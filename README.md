@@ -1,0 +1,45 @@
+# Single-Project Evaluator
+
+Single-Project Evaluator is a read-only command-oriented analysis tool for examining one project at a time. It is designed to combine project intent, WGS lifecycle state, applicable City Hall governance, declared adoption posture, implementation evidence, operational behavior, and verification evidence into a multidimensional evaluation report.
+
+The project is currently in Phase 1: the evaluation spine. This first implementation establishes durable data structures, project evidence collection, report artifact writing, and run provenance. It does not yet perform deep reasoning-model evaluation.
+
+## Source Materials
+
+- `docs/Project Proposal — Single-Project Evaluator.md` is the authoritative PPS seed.
+- `provenance/ChatGPT-Design Project Examination Pipeline-20260819-1807.md` is decision history and rationale.
+
+## Current CLI
+
+```powershell
+python -m pip install -e .
+python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports
+```
+
+The evaluator currently writes:
+
+- `evaluation.json`
+- `report.md`
+- `run-record.json`
+
+The evaluated project is read-only. The current collector inventories files and records discovered project material; it does not run target-project commands, tests, builds, installers, or API calls.
+
+## Adoption Postures
+
+- `personal`: optimized for the creator or a narrowly known operator.
+- `shared`: usable by other people with similar needs and technical context.
+- `adoptable`: independently adoptable by unrelated users who share the problem.
+
+These are evaluation inputs, not maturity levels.
+
+## Development
+
+```powershell
+python -m unittest discover
+```
+
+If system Python is unavailable, use the bundled Codex workspace Python runtime.
+
+## Construction Notes
+
+See `docs/Construction Onboarding Plan.md` for the current staged build plan.

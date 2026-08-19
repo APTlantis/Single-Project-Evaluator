@@ -1,0 +1,22 @@
+[project]
+name = "Single-Project Evaluator"
+working_name = "Single-Project Evaluator"
+class = ["Command Tool", "Analysis Tool"]
+lifecycle_state = "Planning"
+adoption_posture = "Personal"
+
+[governance]
+primary_standard = "PPS"
+expected_delivery_standard = "CTS"
+applicable = ["WGS", "PPS", "CTS"]
+
+[intent]
+mission = "Evaluate one project at a time through project intent, lifecycle, applicable governance, implementation evidence, operational behavior, and declared adoption posture."
+authority_boundary = "read-only evaluation and recommendations; no remediation of evaluated projects"
+pps = "docs/Project Proposal — Single-Project Evaluator.md"
+provenance = "provenance/ChatGPT-Design Project Examination Pipeline-20260819-1807.md"
+
+[implementation]
+language = "Python"
+entrypoint = "single-project-evaluator"
+status = "Phase 1 evaluation spine"
