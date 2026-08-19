@@ -20,6 +20,7 @@ from single_project_evaluator.backend import create_backend
 from single_project_evaluator.models import AdoptionPosture, ApplicabilityState, SurfaceKind
 from single_project_evaluator.request_package import build_reasoning_request, build_response_template
 from single_project_evaluator.response_parser import ResponseValidationError, parse_backend_response
+from single_project_evaluator.serialization import evaluation_from_dict
 
 
 class SpineTests(unittest.TestCase):
@@ -702,6 +703,36 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(response_template, build_response_template("shared"))
             parse_backend_response(response_template, expected_posture="shared")
 
+    def test_evaluation_from_dict_roundtrips_preserved_artifact(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            evaluation = evaluation_from_dict(data)
+            self.assertEqual(evaluation.run.report_id, data["run"]["report_id"])
+            self.assertEqual(evaluation.run.declared_posture, AdoptionPosture.SHARED)
+            self.assertEqual(evaluation.evidence.project_name, project.name)
+            self.assertEqual(evaluation.context.project_name.value, project.name)
+            self.assertEqual(evaluation.to_dict(), data)
+
     def test_cli_evaluate_can_print_json_success_output(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
             project = Path(project_tmp)
@@ -1047,6 +1078,188 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(payload["error_type"], "ValueError")
             self.assertIn("missing required artifacts", payload["error"])
             self.assertIn("response_template", payload["error"])
+
+    def test_cli_validate_run_requires_response_template_posture_to_match_run(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.PERSONAL.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            template = output / "runs" / run_index["runs"][0]["run_dir"] / "response-template.json"
+            template.write_text(json.dumps(build_response_template("shared")), encoding="utf-8")
+            stdout = StringIO()
+            stderr = StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                validate_exit = main(["validate-run", "--out", str(output), "--json"])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(validate_exit, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_type"], "ResponseValidationError")
+            self.assertIn("posture_fitness", payload["error"])
+            self.assertIn("personal", payload["error"])
+
+    def test_cli_complete_run_reuses_preserved_context_without_recollecting_project(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "response.json"
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            source_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            source_entry = source_index["runs"][0]
+            source_evaluation = json.loads(
+                (output / "runs" / source_entry["run_dir"] / "evaluation.json").read_text(encoding="utf-8")
+            )
+            (project / "README.md").write_text("# Changed after preserved run\n", encoding="utf-8")
+            response_file.write_text(
+                json.dumps(
+                    {
+                        "assessment": {
+                            "functional_completeness": 91,
+                            "implementation_quality": 86,
+                            "intent_fidelity": "Strong",
+                            "verification_confidence": "Partial",
+                            "posture_fitness": "Shared - Adequate",
+                            "lifecycle_fitness": "Appropriate",
+                            "release_eligibility": "NOT APPLICABLE",
+                            "blockers": 0,
+                        },
+                        "findings": [
+                            {
+                                "title": "Preserved context was reusable",
+                                "finding_class": "observation",
+                                "area": "Evaluation Workflow",
+                                "authority": "engineering_recommendation",
+                                "applicability": None,
+                                "evidence": ["reasoning-request.json"],
+                                "impact": "The completed report can be produced from a saved evidence package.",
+                                "consequence": "Manual reasoning can be attached without changing the evidence snapshot.",
+                                "recommendation": None,
+                            }
+                        ],
+                        "governance_conformance": {"PPS": "not evaluated"},
+                        "uncertainties": ["The response was supplied from a test fixture."],
+                        "narrative": "## Evaluation Narrative\n\nThe saved bundle was completed without recollecting.",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                complete_exit = main(
+                    [
+                        "complete-run",
+                        "--out",
+                        str(output),
+                        "--run",
+                        source_entry["report_id"][:8],
+                        "--response-file",
+                        str(response_file),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(complete_exit, 0)
+            payload = json.loads(stdout.getvalue())
+            completed_path = Path(payload["artifacts"]["evaluation"])
+            completed = json.loads(completed_path.read_text(encoding="utf-8"))
+            self.assertNotEqual(completed["run"]["report_id"], source_entry["report_id"])
+            self.assertEqual(completed["run"]["reasoning_provider"], "response-file")
+            self.assertEqual(completed["run"]["configuration"]["completed_from_report_id"], source_entry["report_id"])
+            self.assertTrue(completed["run"]["configuration"]["reused_preserved_context"])
+            self.assertEqual(completed["run"]["project_root"], source_evaluation["run"]["project_root"])
+            self.assertEqual(completed["evidence"], source_evaluation["evidence"])
+            self.assertEqual(completed["context"], source_evaluation["context"])
+            self.assertEqual(completed["prepared_context"], source_evaluation["prepared_context"])
+            self.assertEqual(completed["assessment"]["functional_completeness"], 91)
+            report = Path(payload["artifacts"]["report"]).read_text(encoding="utf-8")
+            self.assertIn("The saved bundle was completed without recollecting.", report)
+            refreshed_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(refreshed_index["runs"]), 2)
+            self.assertTrue((output / "runs" / source_entry["run_dir"] / "evaluation.json").exists())
+
+    def test_cli_complete_run_rejects_mismatched_response_posture(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "response.json"
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.PERSONAL.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            response_file.write_text(json.dumps(build_response_template("shared")), encoding="utf-8")
+            stdout = StringIO()
+            stderr = StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                complete_exit = main(
+                    [
+                        "complete-run",
+                        "--out",
+                        str(output),
+                        "--response-file",
+                        str(response_file),
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(complete_exit, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_type"], "ResponseValidationError")
+            self.assertIn("posture_fitness", payload["error"])
+            refreshed_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            self.assertEqual(len(refreshed_index["runs"]), 1)
 
     def test_cli_reports_missing_run_index_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as out_tmp:

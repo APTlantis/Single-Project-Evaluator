@@ -48,6 +48,7 @@ Current status:
 - Optional backend narrative preservation and report rendering implemented for response-file runs.
 - Posture-aware response validation and fillable `response-template.json` artifact implemented to bridge prepared context to response-file evaluation.
 - Preserved run inspection and integrity validation implemented with `list-runs`, `show-run`, and `validate-run`, including JSON output.
+- Preserved run completion implemented with `complete-run`, allowing a structured response file to generate a new completed run from saved context without rereading the evaluated project.
 - Model-backed evaluation not yet implemented.
 
 ### Phase 2: Core Evaluation Workflow
@@ -76,7 +77,7 @@ Objectives:
 Objectives:
 
 - Stabilize command contract.
-- Add machine-readable output guarantees. Started for `evaluate --json`, `validate-response --json`, `list-runs --json`, `show-run --json`, and `validate-run --json` success/error output.
+- Add machine-readable output guarantees. Started for `evaluate --json`, `validate-response --json`, `list-runs --json`, `show-run --json`, `validate-run --json`, and `complete-run --json` success/error output.
 - Define exit codes. Started with success `0`, clean command error `1`, and usage/help fallback `2`.
 - Document examples.
 - Preserve release evidence.

@@ -31,7 +31,7 @@ The evaluator currently writes:
 
 The evaluated project is read-only. The current collector inventories files, extracts project context, prepares a bounded reasoning context bundle, loads bounded governance material from manifest-declared standard paths when available, records passive deterministic-evidence signals such as test sources, build configuration, release artifacts, verification logs, and hash/checklist records, writes a provider-neutral reasoning request package, and records discovered project material; it does not run target-project commands, tests, builds, installers, or API calls. The `--out` directory must be outside the evaluated project so report generation never writes into the target project tree.
 
-Phase 1 supports only the no-op reasoning backend:
+Phase 1 supports the no-op reasoning backend:
 
 ```powershell
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend none
@@ -62,6 +62,15 @@ Use a validated response file to produce populated assessment/report fields:
 ```powershell
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend response-file --response-file reports\response.json
 ```
+
+That command collects a fresh evidence snapshot before applying the response file. To apply a structured response to an already-preserved run without rereading the evaluated project, use `complete-run`:
+
+```powershell
+python -m single_project_evaluator complete-run --out reports --run 93dfff32 --response-file reports\response.json
+python -m single_project_evaluator complete-run --out reports --run 93dfff32 --response-file reports\response.json --json
+```
+
+`complete-run` writes a new run that reuses the selected run's saved `evaluation.json`, `context-bundle.json`, and prepared context. The source run is left unchanged, and the response posture must match the selected run's declared posture.
 
 List preserved evaluation runs from an existing report directory:
 
@@ -94,7 +103,7 @@ python -m single_project_evaluator validate-run --out reports --run 93dfff32 --j
 - Exit `1`: command input or runtime error reported cleanly without a traceback.
 - Exit `2`: command-line usage error or help fallback.
 
-When `--json` is present on `evaluate`, `validate-response`, `list-runs`, `show-run`, or `validate-run`, success output is written as JSON to stdout. Clean command errors are written as JSON to stderr:
+When `--json` is present on `evaluate`, `validate-response`, `list-runs`, `show-run`, `validate-run`, or `complete-run`, success output is written as JSON to stdout. Clean command errors are written as JSON to stderr:
 
 ```json
 {

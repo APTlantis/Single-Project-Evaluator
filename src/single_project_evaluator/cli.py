@@ -591,7 +591,10 @@ def _validate_run_artifacts(entry: dict, artifacts: dict[str, Path]) -> list[dic
         raise ValueError("reasoning-request.json context bundle does not match evaluation.json.")
     pass_check("context_bundle_consistency")
 
-    parse_backend_response(response_template)
+    declared_posture = _required_mapping(evaluation, "evaluation").get("run", {}).get("declared_posture")
+    if not isinstance(declared_posture, str) or not declared_posture:
+        raise ValueError("evaluation.json run.declared_posture is missing or invalid.")
+    parse_backend_response(response_template, expected_posture=declared_posture)
     pass_check("response_template_contract")
 
     if not artifacts["report"].read_text(encoding="utf-8").strip():
