@@ -46,6 +46,7 @@ Current status:
 - Provider-neutral reasoning request package implemented.
 - Structured backend response validation implemented.
 - Optional backend narrative preservation and report rendering implemented for response-file runs.
+- Fillable `response-template.json` artifact implemented to bridge prepared context to response-file evaluation.
 - Model-backed evaluation not yet implemented.
 
 ### Phase 2: Core Evaluation Workflow

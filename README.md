@@ -24,6 +24,7 @@ The evaluator currently writes:
 - `context-bundle.json`
 - `reasoning-request.json`
 - `reasoning-request.md`
+- `response-template.json`
 - `runs/<timestamp>-<report-id>/...`
 - `runs/index.json`
 - `runs/index.md`
@@ -43,6 +44,8 @@ python -m single_project_evaluator evaluate --project D:\Some\Project --posture 
 ```
 
 Model-backed evaluation is not implemented yet. The current backend boundary includes a no-op backend, a response-file backend, and a response parser/validator for the future structured model response. Structured backend responses may include an optional markdown `narrative` field, which is preserved in `evaluation.json` and rendered in `report.md`.
+
+Each evaluation writes `response-template.json` as a fillable skeleton matching the structured backend response contract. Use it with `reasoning-request.json` or `reasoning-request.md` when preparing an external/manual reasoning response.
 
 Validate a saved structured backend response before using it:
 
