@@ -24,6 +24,9 @@ The evaluator currently writes:
 - `context-bundle.json`
 - `reasoning-request.json`
 - `reasoning-request.md`
+- `runs/<timestamp>-<report-id>/...`
+- `runs/index.json`
+- `runs/index.md`
 
 The evaluated project is read-only. The current collector inventories files, extracts project context, prepares a bounded reasoning context bundle, writes a provider-neutral reasoning request package, and records discovered project material; it does not run target-project commands, tests, builds, installers, or API calls.
 
@@ -33,7 +36,19 @@ Phase 1 supports only the no-op reasoning backend:
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend none
 ```
 
-Model-backed evaluation is not implemented yet. The current backend boundary includes a no-op backend and a response parser/validator for the future structured model response.
+Model-backed evaluation is not implemented yet. The current backend boundary includes a no-op backend, a response-file backend, and a response parser/validator for the future structured model response.
+
+Validate a saved structured backend response before using it:
+
+```powershell
+python -m single_project_evaluator validate-response --response-file reports\response.json
+```
+
+Use a validated response file to produce populated assessment/report fields:
+
+```powershell
+python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend response-file --response-file reports\response.json
+```
 
 ## Adoption Postures
 

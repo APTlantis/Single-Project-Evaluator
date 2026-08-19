@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from .models import (
     EvaluationRun,
 )
 from .reports import write_evaluation_artifacts
+from .response_parser import parse_backend_response
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,6 +29,12 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return evaluate_command(args)
         except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
+    if args.command == "validate-response":
+        try:
+            return validate_response_command(args)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
 
@@ -65,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument(
         "--response-file",
         help="Path to a structured backend response JSON file for --backend response-file.",
+    )
+
+    validate_response = subparsers.add_parser(
+        "validate-response",
+        help="Validate a structured backend response JSON file.",
+    )
+    validate_response.add_argument(
+        "--response-file",
+        required=True,
+        help="Path to the backend response JSON file to validate.",
     )
     return parser
 
@@ -112,4 +130,18 @@ def evaluate_command(args: argparse.Namespace) -> int:
     print(f"Wrote run record: {artifacts['latest_run_record']}")
     print(f"Wrote context bundle: {artifacts['latest_context_bundle']}")
     print(f"Wrote reasoning request: {artifacts['latest_reasoning_request']}")
+    print(f"Wrote run index: {artifacts['run_index']}")
+    return 0
+
+
+def validate_response_command(args: argparse.Namespace) -> int:
+    response_file = Path(args.response_file)
+    data = json.loads(response_file.read_text(encoding="utf-8"))
+    assessment, findings, governance_conformance, uncertainties = parse_backend_response(data)
+    print(f"Valid response: {response_file}")
+    print(f"Findings: {len(findings)}")
+    print(f"Blockers: {assessment.blockers}")
+    print(f"Release eligibility: {assessment.release_eligibility}")
+    print(f"Governance conformance entries: {len(governance_conformance)}")
+    print(f"Uncertainties: {len(uncertainties)}")
     return 0

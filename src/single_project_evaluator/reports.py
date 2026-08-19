@@ -35,7 +35,8 @@ def write_evaluation_artifacts(evaluation: Evaluation, output_dir: Path) -> dict
     paths["report"].write_text(render_markdown_report(evaluation), encoding="utf-8")
 
     latest_paths = _write_latest_aliases(paths, output_dir)
-    return {"run_dir": run_dir, **paths, **latest_paths}
+    index_paths = _write_run_index(output_dir)
+    return {"run_dir": run_dir, **paths, **latest_paths, **index_paths}
 
 
 def _run_directory_name(evaluation: Evaluation) -> str:
@@ -52,6 +53,71 @@ def _write_latest_aliases(paths: dict[str, Path], output_dir: Path) -> dict[str,
         shutil.copyfile(paths[key], latest)
         latest_paths[f"latest_{key}"] = latest
     return latest_paths
+
+
+def _write_run_index(output_dir: Path) -> dict[str, Path]:
+    runs_dir = output_dir / "runs"
+    entries = []
+    for run_dir in sorted((path for path in runs_dir.iterdir() if path.is_dir()), reverse=True):
+        run_record_path = run_dir / ARTIFACT_FILENAMES["run_record"]
+        evaluation_path = run_dir / ARTIFACT_FILENAMES["evaluation"]
+        if not run_record_path.exists() or not evaluation_path.exists():
+            continue
+        try:
+            run_record = json.loads(run_record_path.read_text(encoding="utf-8"))
+            evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        entries.append(
+            {
+                "run_dir": run_dir.name,
+                "report_id": run_record.get("report_id"),
+                "timestamp_utc": run_record.get("timestamp_utc"),
+                "project_root": run_record.get("project_root"),
+                "declared_posture": run_record.get("declared_posture"),
+                "reasoning_provider": run_record.get("reasoning_provider"),
+                "model_identifier": run_record.get("model_identifier"),
+                "release_eligibility": evaluation.get("assessment", {}).get("release_eligibility"),
+                "blockers": evaluation.get("assessment", {}).get("blockers"),
+                "finding_count": len(evaluation.get("findings", [])),
+            }
+        )
+
+    index_json = runs_dir / "index.json"
+    index_md = runs_dir / "index.md"
+    index_json.write_text(json.dumps({"runs": entries}, indent=2), encoding="utf-8")
+    index_md.write_text(_render_run_index(entries), encoding="utf-8")
+    return {
+        "run_index": index_json,
+        "run_index_md": index_md,
+    }
+
+
+def _render_run_index(entries: list[dict]) -> str:
+    lines = [
+        "# Evaluation Run Index",
+        "",
+        "| Timestamp | Project | Posture | Backend | Release | Blockers | Findings | Run |",
+        "|---|---|---|---|---|---:|---:|---|",
+    ]
+    for entry in entries:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(entry.get("timestamp_utc") or ""),
+                    str(entry.get("project_root") or ""),
+                    str(entry.get("declared_posture") or ""),
+                    str(entry.get("reasoning_provider") or ""),
+                    str(entry.get("release_eligibility") or ""),
+                    str(entry.get("blockers") if entry.get("blockers") is not None else ""),
+                    str(entry.get("finding_count") if entry.get("finding_count") is not None else ""),
+                    f"`{entry.get('run_dir')}`",
+                ]
+            )
+            + " |"
+        )
+    return "\n".join(lines) + "\n"
 
 
 def _context_bundle(evaluation_data: dict) -> dict:

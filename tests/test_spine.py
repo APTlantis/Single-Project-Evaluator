@@ -353,6 +353,68 @@ class SpineTests(unittest.TestCase):
         with self.assertRaises(ResponseValidationError):
             parse_backend_response(response)
 
+    def test_cli_validate_response_accepts_valid_file(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            response_file = Path(tmp) / "response.json"
+            response_file.write_text(
+                json.dumps(
+                    {
+                        "assessment": {
+                            "functional_completeness": 80,
+                            "implementation_quality": 75,
+                            "intent_fidelity": "Strong",
+                            "verification_confidence": "Partial",
+                            "posture_fitness": "Shared - Adequate",
+                            "lifecycle_fitness": "Appropriate",
+                            "release_eligibility": "NOT APPLICABLE",
+                            "blockers": 0,
+                        },
+                        "findings": [],
+                        "governance_conformance": {"PPS": "not evaluated"},
+                        "uncertainties": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stdout = StringIO()
+
+            with redirect_stdout(stdout):
+                exit_code = main(["validate-response", "--response-file", str(response_file)])
+
+            self.assertEqual(exit_code, 0)
+            self.assertIn("Valid response:", stdout.getvalue())
+            self.assertIn("Findings: 0", stdout.getvalue())
+
+    def test_cli_validate_response_rejects_invalid_file_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            response_file = Path(tmp) / "response.json"
+            response_file.write_text(
+                json.dumps(
+                    {
+                        "assessment": {
+                            "functional_completeness": 80,
+                            "implementation_quality": 75,
+                            "intent_fidelity": "Pretty Good",
+                            "verification_confidence": "Partial",
+                            "posture_fitness": "Shared - Adequate",
+                            "lifecycle_fitness": "Appropriate",
+                            "release_eligibility": "NOT APPLICABLE",
+                            "blockers": 0,
+                        },
+                        "findings": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stderr = StringIO()
+
+            with redirect_stderr(stderr), redirect_stdout(StringIO()):
+                exit_code = main(["validate-response", "--response-file", str(response_file)])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("error:", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
+
     def test_cli_writes_phase_1_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
             project = Path(project_tmp)
@@ -382,15 +444,21 @@ class SpineTests(unittest.TestCase):
             self.assertTrue((output / "reasoning-request.json").exists())
             self.assertTrue((output / "reasoning-request.md").exists())
             run_dirs = list((output / "runs").iterdir())
-            self.assertEqual(len(run_dirs), 1)
-            self.assertTrue((run_dirs[0] / "evaluation.json").exists())
-            self.assertTrue((run_dirs[0] / "report.md").exists())
+            materialized_run_dirs = [path for path in run_dirs if path.is_dir()]
+            self.assertEqual(len(materialized_run_dirs), 1)
+            self.assertTrue((materialized_run_dirs[0] / "evaluation.json").exists())
+            self.assertTrue((materialized_run_dirs[0] / "report.md").exists())
+            self.assertTrue((output / "runs" / "index.json").exists())
+            self.assertTrue((output / "runs" / "index.md").exists())
 
             data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
-            run_data = json.loads((run_dirs[0] / "evaluation.json").read_text(encoding="utf-8"))
+            run_data = json.loads((materialized_run_dirs[0] / "evaluation.json").read_text(encoding="utf-8"))
+            run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
             bundle = json.loads((output / "context-bundle.json").read_text(encoding="utf-8"))
             reasoning_request = json.loads((output / "reasoning-request.json").read_text(encoding="utf-8"))
             self.assertEqual(data, run_data)
+            self.assertEqual(len(run_index["runs"]), 1)
+            self.assertEqual(run_index["runs"][0]["report_id"], data["run"]["report_id"])
             self.assertEqual(data["run"]["declared_posture"], "shared")
             self.assertEqual(data["run"]["reasoning_provider"], "none")
             self.assertEqual(data["run"]["configuration"]["backend"], "none")
