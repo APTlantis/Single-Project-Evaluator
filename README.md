@@ -2,7 +2,7 @@
 
 Single-Project Evaluator is a read-only command-oriented analysis tool for examining one project at a time. It is designed to combine project intent, WGS lifecycle state, applicable City Hall governance, declared adoption posture, implementation evidence, operational behavior, and verification evidence into a multidimensional evaluation report.
 
-The project is currently in Phase 1: the evaluation spine. This first implementation establishes durable data structures, project evidence collection, report artifact writing, and run provenance. It does not yet perform deep reasoning-model evaluation.
+The project has moved from the Phase 1 evaluation spine into early Phase 2. The current implementation establishes durable data structures, project evidence collection, report artifact writing, run provenance, manual preserved-run completion, and an explicitly selected model-backed reasoning path.
 
 ## Source Materials
 
@@ -43,7 +43,7 @@ For machine-readable success output, add `--json`:
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend none --json
 ```
 
-Model-backed evaluation is not implemented yet. The current backend boundary includes a no-op backend, a response-file backend, and a response parser/validator for the future structured model response. Structured backend responses may include an optional markdown `narrative` field, which is preserved in `evaluation.json` and rendered in `report.md`.
+The current backend boundary includes a no-op backend, a response-file backend, an optional OpenAI Responses API backend, and a response parser/validator for the structured model response. Structured backend responses may include an optional markdown `narrative` field, which is preserved in `evaluation.json` and rendered in `report.md`.
 
 Each evaluation writes `response-template.json` as a fillable skeleton matching the structured backend response contract and the run's declared posture. Use it with `reasoning-request.json` or `reasoning-request.md` when preparing an external/manual reasoning response.
 
@@ -71,6 +71,15 @@ python -m single_project_evaluator complete-run --out reports --run 93dfff32 --r
 ```
 
 `complete-run` writes a new run that reuses the selected run's saved `evaluation.json`, `context-bundle.json`, and prepared context. The source run is left unchanged, and the response posture must match the selected run's declared posture.
+
+To run model-backed evaluation explicitly, set `OPENAI_API_KEY` and choose `--backend openai` with a model:
+
+```powershell
+$env:OPENAI_API_KEY = "..."
+python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend openai --model gpt-5
+```
+
+The OpenAI backend sends the same bounded reasoning request package used by the manual workflow, requests schema-guided Structured Outputs, and parses the model's returned JSON through the same response contract. It is never used unless `--backend openai` is selected.
 
 List preserved evaluation runs from an existing report directory:
 

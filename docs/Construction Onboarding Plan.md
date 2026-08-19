@@ -4,13 +4,13 @@
 
 Single-Project Evaluator has been onboarded as a planning-stage CTS command tool and analysis tool.
 
-The current implementation is Phase 1: the evaluation spine. It can collect read-only project evidence, represent an evaluation run, and write evaluation artifacts. It does not yet perform deep model-backed project judgment.
+The current implementation has moved from the Phase 1 evaluation spine into early Phase 2. It can collect read-only project evidence, represent an evaluation run, write evaluation artifacts, support manual preserved-run completion, and optionally invoke an explicitly selected OpenAI Responses API backend.
 
 ## Source Authority
 
-- `Project Proposal — Single-Project Evaluator.md` is the PPS seed and project intent record.
-- `../provenance/ChatGPT-Design Project Examination Pipeline-20260819-1807.md` is conversation provenance and rationale.
-- `../project.manifest.toml` records current project identity, governance, lifecycle, and implementation status.
+- `docs/Project Proposal — Single-Project Evaluator.md` is the PPS seed and project intent record.
+- `provenance/ChatGPT-Design Project Examination Pipeline-20260819-1807.md` is conversation provenance and rationale.
+- `project.manifest.toml` records current project identity, governance, lifecycle, and implementation status.
 
 ## Construction Phases
 
@@ -49,7 +49,9 @@ Current status:
 - Posture-aware response validation and fillable `response-template.json` artifact implemented to bridge prepared context to response-file evaluation.
 - Preserved run inspection and integrity validation implemented with `list-runs`, `show-run`, and `validate-run`, including JSON output.
 - Preserved run completion implemented with `complete-run`, allowing a structured response file to generate a new completed run from saved context without rereading the evaluated project.
-- Model-backed evaluation not yet implemented.
+- Optional OpenAI Responses API backend implemented behind explicit `--backend openai` selection.
+- OpenAI backend requests schema-guided Structured Outputs before parser validation.
+- Model-backed evaluation is available only when explicitly selected with credentials and a model; passive/no-op and manual response-file workflows remain supported.
 
 ### Phase 2: Core Evaluation Workflow
 
@@ -59,7 +61,7 @@ Objectives:
 - Identify project class and likely governed surfaces.
 - Load applicable governance material.
 - Prepare deterministic evidence for reasoning.
-- Invoke a configurable reasoning backend.
+- Invoke a configurable reasoning backend. Started with explicit OpenAI Responses API support.
 - Return structured findings and a narrative report.
 
 ### Phase 3: Verification Cases

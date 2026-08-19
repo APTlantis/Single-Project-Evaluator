@@ -320,6 +320,16 @@ class SpineTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             create_backend("response-file")
 
+    def test_create_backend_requires_api_key_for_openai_backend(self) -> None:
+        with patch.dict("os.environ", {}, clear=True):
+            with self.assertRaises(ValueError):
+                create_backend("openai", model="gpt-test")
+
+    def test_create_backend_requires_model_for_openai_backend(self) -> None:
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+            with self.assertRaises(ValueError):
+                create_backend("openai")
+
     def test_reasoning_request_wraps_context_without_assessment(self) -> None:
         context_bundle = {
             "run": {
@@ -1260,6 +1270,100 @@ class SpineTests(unittest.TestCase):
             self.assertIn("posture_fitness", payload["error"])
             refreshed_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
             self.assertEqual(len(refreshed_index["runs"]), 1)
+
+    def test_cli_can_use_mocked_openai_backend(self) -> None:
+        class FakeHTTPResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self) -> bytes:
+                return json.dumps(
+                    {
+                        "output_text": json.dumps(
+                            {
+                                "assessment": {
+                                    "functional_completeness": 88,
+                                    "implementation_quality": 84,
+                                    "intent_fidelity": "Strong",
+                                    "verification_confidence": "Partial",
+                                    "posture_fitness": "Shared - Adequate",
+                                    "lifecycle_fitness": "Appropriate",
+                                    "release_eligibility": "NOT APPLICABLE",
+                                    "blockers": 0,
+                                },
+                                "findings": [
+                                    {
+                                        "title": "Mocked OpenAI response parsed",
+                                        "finding_class": "observation",
+                                        "area": "Reasoning Backend",
+                                        "authority": "engineering_recommendation",
+                                        "applicability": None,
+                                        "evidence": ["reasoning-request.json"],
+                                        "impact": "The OpenAI backend can parse a structured model response.",
+                                        "consequence": "The live API boundary can share the response-file contract.",
+                                        "recommendation": None,
+                                    }
+                                ],
+                                "governance_conformance": {"PPS": "not evaluated"},
+                                "uncertainties": ["The API was mocked in this test."],
+                                "narrative": "## Evaluation Narrative\n\nThe mocked API result was parsed.",
+                            }
+                        )
+                    }
+                ).encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+                with patch("single_project_evaluator.backend.urlopen", return_value=FakeHTTPResponse()) as openai_call:
+                    with redirect_stdout(StringIO()):
+                        exit_code = main(
+                            [
+                                "evaluate",
+                                "--project",
+                                str(project),
+                                "--posture",
+                                AdoptionPosture.SHARED.value,
+                                "--out",
+                                str(output),
+                                "--backend",
+                                "openai",
+                                "--model",
+                                "gpt-test",
+                                "--api-base",
+                                "https://api.example.test/v1/responses",
+                            ]
+                        )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(openai_call.call_count, 1)
+            request = openai_call.call_args.args[0]
+            self.assertEqual(request.full_url, "https://api.example.test/v1/responses")
+            body = json.loads(request.data.decode("utf-8"))
+            self.assertEqual(body["model"], "gpt-test")
+            self.assertIn("input", body)
+            self.assertEqual(body["text"]["format"]["type"], "json_schema")
+            self.assertEqual(body["text"]["format"]["name"], "single_project_evaluation_response")
+            self.assertFalse(body["text"]["format"]["strict"])
+            self.assertEqual(
+                body["text"]["format"]["schema"]["properties"]["assessment"]["properties"]["release_eligibility"][
+                    "enum"
+                ],
+                ["PASS", "BLOCKED", "NOT APPLICABLE"],
+            )
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            self.assertEqual(data["run"]["reasoning_provider"], "openai")
+            self.assertEqual(data["run"]["model_identifier"], "gpt-test")
+            self.assertEqual(data["run"]["configuration"]["api_base"], "https://api.example.test/v1/responses")
+            self.assertEqual(data["assessment"]["functional_completeness"], 88)
+            self.assertEqual(data["governance_conformance"]["PPS"], "not evaluated")
+            self.assertIn("The mocked API result was parsed.", (output / "report.md").read_text(encoding="utf-8"))
 
     def test_cli_reports_missing_run_index_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as out_tmp:

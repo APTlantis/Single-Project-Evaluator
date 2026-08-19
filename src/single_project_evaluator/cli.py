@@ -97,12 +97,27 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument(
         "--backend",
         default="none",
-        choices=["none", "response-file"],
+        choices=["none", "response-file", "openai"],
         help="Reasoning backend to use.",
     )
     evaluate.add_argument(
         "--response-file",
         help="Path to a structured backend response JSON file for --backend response-file.",
+    )
+    evaluate.add_argument(
+        "--model",
+        help="Reasoning model identifier for --backend openai.",
+    )
+    evaluate.add_argument(
+        "--api-base",
+        default="https://api.openai.com/v1/responses",
+        help="Responses API endpoint for --backend openai.",
+    )
+    evaluate.add_argument(
+        "--timeout-seconds",
+        default=120,
+        type=int,
+        help="HTTP timeout in seconds for --backend openai.",
     )
     evaluate.add_argument(
         "--json",
@@ -202,7 +217,13 @@ def evaluate_command(args: argparse.Namespace) -> int:
     _ensure_output_outside_project(Path(evidence.root), output_dir)
     context = extract_project_context(project_root, evidence)
     prepared_context = prepare_evaluation_context(evidence, context)
-    backend = create_backend(args.backend, Path(args.response_file) if args.response_file else None)
+    backend = create_backend(
+        args.backend,
+        Path(args.response_file) if args.response_file else None,
+        model=args.model,
+        api_base=args.api_base,
+        timeout_seconds=args.timeout_seconds,
+    )
     run = EvaluationRun(
         report_id=str(uuid4()),
         timestamp_utc=datetime.now(UTC).replace(microsecond=0).isoformat(),
@@ -216,6 +237,9 @@ def evaluate_command(args: argparse.Namespace) -> int:
             "max_files": args.max_files,
             "backend": args.backend,
             "response_file": args.response_file,
+            "model": args.model,
+            "api_base": args.api_base if args.backend == "openai" else None,
+            "timeout_seconds": args.timeout_seconds if args.backend == "openai" else None,
         },
     )
     backend_result = backend.evaluate(run, evidence, context, prepared_context)
