@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from . import __version__
 from .collector import collect_project_evidence
+from .context import extract_project_context
 from .models import (
     AdoptionPosture,
     AssessmentProfile,
@@ -61,6 +62,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
     posture = AdoptionPosture(args.posture)
 
     evidence = collect_project_evidence(project_root, max_files=args.max_files)
+    context = extract_project_context(project_root, evidence)
     run = EvaluationRun(
         report_id=str(uuid4()),
         timestamp_utc=datetime.now(UTC).replace(microsecond=0).isoformat(),
@@ -77,6 +79,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
     evaluation = Evaluation(
         run=run,
         evidence=evidence,
+        context=context,
         assessment=AssessmentProfile(
             posture_fitness=f"{posture.value.title()} - Not assessed",
             release_eligibility="NOT APPLICABLE",

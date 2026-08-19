@@ -61,6 +61,26 @@ class ProjectEvidence:
 
 
 @dataclass(frozen=True)
+class ContextValue:
+    value: Any
+    source: str | None = None
+
+
+@dataclass(frozen=True)
+class ProjectContext:
+    project_name: ContextValue = field(default_factory=lambda: ContextValue(None))
+    project_classes: ContextValue = field(default_factory=lambda: ContextValue([]))
+    lifecycle_state: ContextValue = field(default_factory=lambda: ContextValue(None))
+    manifest_adoption_posture: ContextValue = field(default_factory=lambda: ContextValue(None))
+    primary_standard: ContextValue = field(default_factory=lambda: ContextValue(None))
+    expected_delivery_standard: ContextValue = field(default_factory=lambda: ContextValue(None))
+    applicable_governance: ContextValue = field(default_factory=lambda: ContextValue([]))
+    pps_path: ContextValue = field(default_factory=lambda: ContextValue(None))
+    readme_path: ContextValue = field(default_factory=lambda: ContextValue(None))
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class AssessmentProfile:
     functional_completeness: int | None = None
     implementation_quality: int | None = None
@@ -101,6 +121,7 @@ class EvaluationRun:
 class Evaluation:
     run: EvaluationRun
     evidence: ProjectEvidence
+    context: ProjectContext
     assessment: AssessmentProfile
     findings: list[Finding]
     governance_conformance: dict[str, str] = field(default_factory=dict)

@@ -36,6 +36,9 @@ def render_markdown_report(evaluation: Evaluation) -> str:
         "",
         f"- Project root: `{evaluation.evidence.root}`",
         f"- Declared posture: `{evaluation.run.declared_posture}`",
+        f"- Context project name: {_context_value(evaluation.context.project_name)}",
+        f"- Context lifecycle: {_context_value(evaluation.context.lifecycle_state)}",
+        f"- Context project class: {_context_value(evaluation.context.project_classes)}",
         f"- Files examined: {evaluation.evidence.files_examined}",
         f"- Git commit: `{evaluation.evidence.git_commit or 'unavailable'}`",
         f"- Functional Completeness: {_pct(evaluation.assessment.functional_completeness)}",
@@ -57,6 +60,25 @@ def render_markdown_report(evaluation: Evaluation) -> str:
             lines.append(f"- {record_type}: {', '.join(f'`{path}`' for path in paths[:10])}")
     else:
         lines.append("- No common project records were detected by the Phase 1 collector.")
+
+    lines.extend(["", "## Extracted Project Context", ""])
+    context_rows = [
+        ("Project name", evaluation.context.project_name),
+        ("Project classes", evaluation.context.project_classes),
+        ("Lifecycle state", evaluation.context.lifecycle_state),
+        ("Manifest adoption posture", evaluation.context.manifest_adoption_posture),
+        ("Primary standard", evaluation.context.primary_standard),
+        ("Expected delivery standard", evaluation.context.expected_delivery_standard),
+        ("Applicable governance", evaluation.context.applicable_governance),
+        ("PPS path", evaluation.context.pps_path),
+        ("README path", evaluation.context.readme_path),
+    ]
+    for label, value in context_rows:
+        lines.append(f"- {label}: {_context_value(value)}")
+    if evaluation.context.notes:
+        lines.append("- Context notes: " + "; ".join(evaluation.context.notes))
+    else:
+        lines.append("- Context notes: none")
 
     lines.extend(["", "## Authority Record Snapshots", ""])
     if evaluation.evidence.authority_records:
@@ -121,3 +143,16 @@ def render_markdown_report(evaluation: Evaluation) -> str:
 
 def _pct(value: int | None) -> str:
     return "Not assessed" if value is None else f"{value}%"
+
+
+def _context_value(value) -> str:
+    if value.value in (None, [], ""):
+        return "unknown"
+    elif isinstance(value.value, list):
+        rendered = ", ".join(str(item) for item in value.value)
+    else:
+        rendered = str(value.value)
+
+    if value.source:
+        return f"{rendered} (`{value.source}`)"
+    return rendered

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from single_project_evaluator.cli import main
 from single_project_evaluator.collector import _git_commit, collect_project_evidence
+from single_project_evaluator.context import extract_project_context
 from single_project_evaluator.models import AdoptionPosture
 
 
@@ -31,6 +32,15 @@ class SpineTests(unittest.TestCase):
             self.assertIn("manifest", evidence.detected_records)
             self.assertEqual(len(evidence.authority_records), 2)
             self.assertTrue(evidence.authority_records[0].sha256)
+
+    def test_collect_project_evidence_detects_named_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "File Cabinet.manifest.toml").write_text("[project]\nname='File Cabinet'\n", encoding="utf-8")
+
+            evidence = collect_project_evidence(root)
+
+            self.assertEqual(evidence.detected_records["manifest"], ["File Cabinet.manifest.toml"])
 
     def test_collect_project_evidence_ignores_generated_noise(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -90,6 +100,83 @@ class SpineTests(unittest.TestCase):
             args = run.call_args.args[0]
             self.assertEqual(args[:3], ["git", "-c", f"safe.directory={root.as_posix()}"])
 
+    def test_extract_project_context_prefers_manifest_then_pps(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            docs = root / "docs"
+            docs.mkdir()
+            (root / "project.manifest.toml").write_text(
+                "\n".join(
+                    [
+                        "[project]",
+                        'name = "Manifest Name"',
+                        'class = ["Command Tool", "Analysis Tool"]',
+                        'lifecycle_state = "Planning"',
+                        'adoption_posture = "Shared"',
+                        "",
+                        "[governance]",
+                        'primary_standard = "PPS"',
+                        'expected_delivery_standard = "CTS"',
+                        'applicable = ["WGS", "PPS", "CTS"]',
+                        "",
+                        "[intent]",
+                        'pps = "docs/Project Proposal - Example.md"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (docs / "Project Proposal - Example.md").write_text(
+                "\n".join(
+                    [
+                        "# Project Proposal - Example",
+                        "",
+                        "**WGS Lifecycle State:** Implementation",
+                        "**Primary Governing Standard:** DRS",
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            evidence = collect_project_evidence(root)
+            context = extract_project_context(root, evidence)
+
+            self.assertEqual(context.project_name.value, "Manifest Name")
+            self.assertEqual(context.lifecycle_state.value, "Planning")
+            self.assertEqual(context.primary_standard.value, "PPS")
+            self.assertEqual(context.pps_path.value, "docs/Project Proposal - Example.md")
+
+    def test_extract_project_context_reads_city_hall_manifest_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "File Cabinet.manifest.toml").write_text(
+                "\n".join(
+                    [
+                        "[entity]",
+                        'title = "File Cabinet"',
+                        'kind = "project"',
+                        "",
+                        "[project]",
+                        'title = "File Cabinet"',
+                        'type = "tool"',
+                        'stage = "production"',
+                        "",
+                        "[governance]",
+                        'primary_standard = "DRS"',
+                        'additional_standards = ["WGS", "PPS", "AAMHS"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            evidence = collect_project_evidence(root)
+            context = extract_project_context(root, evidence)
+
+            self.assertEqual(context.project_name.value, "File Cabinet")
+            self.assertEqual(context.project_classes.value, ["tool", "project"])
+            self.assertEqual(context.lifecycle_state.value, "production")
+            self.assertEqual(context.primary_standard.value, "DRS")
+            self.assertEqual(context.applicable_governance.value, ["DRS", "WGS", "PPS", "AAMHS"])
+
     def test_cli_writes_phase_1_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
             project = Path(project_tmp)
@@ -117,6 +204,7 @@ class SpineTests(unittest.TestCase):
             data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
             self.assertEqual(data["run"]["declared_posture"], "shared")
             self.assertEqual(data["run"]["reasoning_provider"], "none")
+            self.assertEqual(data["context"]["project_name"]["value"], project.name)
 
 
 if __name__ == "__main__":

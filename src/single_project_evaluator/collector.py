@@ -116,7 +116,7 @@ def _record_types(path: Path, root: Path | None = None) -> list[str]:
     extension = path.suffix.lower()
     record_types = []
 
-    if lower_name in {"project.manifest.toml", "development.manifest.toml", "manifest.toml"}:
+    if lower_name in {"project.manifest.toml", "development.manifest.toml", "manifest.toml"} or lower_name.endswith(".manifest.toml"):
         record_types.append("manifest")
     if extension in {".md", ".txt"} and (
         "project proposal" in stem or stem == "pps" or stem.endswith(" pps")
