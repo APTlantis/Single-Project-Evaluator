@@ -21,6 +21,11 @@ from .reports import write_evaluation_artifacts
 from .response_parser import parse_backend_response
 
 
+EXIT_OK = 0
+EXIT_COMMAND_ERROR = 1
+EXIT_USAGE = 2
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -29,23 +34,23 @@ def main(argv: list[str] | None = None) -> int:
         try:
             return evaluate_command(args)
         except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
+            _print_error(exc, json_output=args.json)
+            return EXIT_COMMAND_ERROR
     if args.command == "validate-response":
         try:
             return validate_response_command(args)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
+            _print_error(exc, json_output=args.json)
+            return EXIT_COMMAND_ERROR
     if args.command == "list-runs":
         try:
             return list_runs_command(args)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
-            print(f"error: {exc}", file=sys.stderr)
-            return 1
+            _print_error(exc, json_output=args.json)
+            return EXIT_COMMAND_ERROR
 
     parser.print_help()
-    return 2
+    return EXIT_USAGE
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -80,6 +85,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--response-file",
         help="Path to a structured backend response JSON file for --backend response-file.",
     )
+    evaluate.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable success or error output instead of text.",
+    )
 
     validate_response = subparsers.add_parser(
         "validate-response",
@@ -90,12 +100,22 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Path to the backend response JSON file to validate.",
     )
+    validate_response.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable success or error output instead of text.",
+    )
 
     list_runs = subparsers.add_parser(
         "list-runs",
         help="List preserved evaluation runs from an existing run index.",
     )
     list_runs.add_argument("--out", default="reports", help="Directory containing generated reports.")
+    list_runs.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable success or error output instead of text.",
+    )
     return parser
 
 
@@ -105,6 +125,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
     posture = AdoptionPosture(args.posture)
 
     evidence = collect_project_evidence(project_root, max_files=args.max_files)
+    _ensure_output_outside_project(Path(evidence.root), output_dir)
     context = extract_project_context(project_root, evidence)
     prepared_context = prepare_evaluation_context(evidence, context)
     backend = create_backend(args.backend, Path(args.response_file) if args.response_file else None)
@@ -136,6 +157,18 @@ def evaluate_command(args: argparse.Namespace) -> int:
     )
 
     artifacts = write_evaluation_artifacts(evaluation, output_dir)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "run_dir": str(artifacts["run_dir"]),
+                    "artifacts": {key: str(value) for key, value in artifacts.items()},
+                },
+                indent=2,
+            )
+        )
+        return EXIT_OK
     print(f"Wrote run directory: {artifacts['run_dir']}")
     print(f"Wrote evaluation: {artifacts['latest_evaluation']}")
     print(f"Wrote report: {artifacts['latest_report']}")
@@ -143,20 +176,36 @@ def evaluate_command(args: argparse.Namespace) -> int:
     print(f"Wrote context bundle: {artifacts['latest_context_bundle']}")
     print(f"Wrote reasoning request: {artifacts['latest_reasoning_request']}")
     print(f"Wrote run index: {artifacts['run_index']}")
-    return 0
+    return EXIT_OK
 
 
 def validate_response_command(args: argparse.Namespace) -> int:
     response_file = Path(args.response_file)
     data = json.loads(response_file.read_text(encoding="utf-8"))
     assessment, findings, governance_conformance, uncertainties = parse_backend_response(data)
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "response_file": str(response_file),
+                    "findings": len(findings),
+                    "blockers": assessment.blockers,
+                    "release_eligibility": assessment.release_eligibility,
+                    "governance_conformance_entries": len(governance_conformance),
+                    "uncertainties": len(uncertainties),
+                },
+                indent=2,
+            )
+        )
+        return EXIT_OK
     print(f"Valid response: {response_file}")
     print(f"Findings: {len(findings)}")
     print(f"Blockers: {assessment.blockers}")
     print(f"Release eligibility: {assessment.release_eligibility}")
     print(f"Governance conformance entries: {len(governance_conformance)}")
     print(f"Uncertainties: {len(uncertainties)}")
-    return 0
+    return EXIT_OK
 
 
 def list_runs_command(args: argparse.Namespace) -> int:
@@ -168,9 +217,21 @@ def list_runs_command(args: argparse.Namespace) -> int:
     runs = data.get("runs")
     if not isinstance(runs, list):
         raise ValueError(f"run index has no runs list: {index_path}")
+    if args.json:
+        print(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "index_path": str(index_path),
+                    "runs": runs,
+                },
+                indent=2,
+            )
+        )
+        return EXIT_OK
     if not runs:
         print("No evaluation runs found.")
-        return 0
+        return EXIT_OK
 
     print("Timestamp | Project | Posture | Backend | Release | Blockers | Findings | Run")
     print("--- | --- | --- | --- | --- | ---: | ---: | ---")
@@ -191,10 +252,45 @@ def list_runs_command(args: argparse.Namespace) -> int:
                 ]
             )
         )
-    return 0
+    return EXIT_OK
 
 
 def _display_value(value: object) -> str:
     if value is None:
         return ""
     return str(value).replace("\r", " ").replace("\n", " ")
+
+
+def _print_error(exc: Exception, *, json_output: bool) -> None:
+    if json_output:
+        print(
+            json.dumps(
+                {
+                    "status": "error",
+                    "error": str(exc),
+                    "error_type": exc.__class__.__name__,
+                },
+                indent=2,
+            ),
+            file=sys.stderr,
+        )
+        return
+    print(f"error: {exc}", file=sys.stderr)
+
+
+def _ensure_output_outside_project(project_root: Path, output_dir: Path) -> None:
+    resolved_project = project_root.resolve()
+    resolved_output = output_dir.resolve()
+    if _is_relative_to(resolved_output, resolved_project):
+        raise ValueError(
+            "output directory must be outside the evaluated project to preserve the read-only boundary: "
+            f"{resolved_output}"
+        )
+
+
+def _is_relative_to(path: Path, possible_parent: Path) -> bool:
+    try:
+        path.relative_to(possible_parent)
+    except ValueError:
+        return False
+    return True

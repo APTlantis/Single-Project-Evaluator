@@ -73,7 +73,7 @@ Objectives:
 Objectives:
 
 - Stabilize command contract.
-- Add machine-readable output guarantees.
+- Add machine-readable output guarantees. Started for `evaluate --json` and `list-runs --json` success output.
 - Define exit codes.
 - Document examples.
 - Preserve release evidence.
@@ -85,3 +85,5 @@ Release work must not be confused with evaluation-engine completeness.
 The evaluator must not modify evaluated projects.
 
 Phase 1 does not run target-project commands. Later phases may add explicitly enabled active checks, but passive evaluation remains the default.
+
+Report output is required to live outside the evaluated project tree. The CLI rejects `--out` values inside the target project before writing artifacts.

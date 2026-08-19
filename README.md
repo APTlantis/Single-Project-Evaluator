@@ -28,12 +28,18 @@ The evaluator currently writes:
 - `runs/index.json`
 - `runs/index.md`
 
-The evaluated project is read-only. The current collector inventories files, extracts project context, prepares a bounded reasoning context bundle, loads bounded governance material from manifest-declared standard paths when available, records passive deterministic-evidence signals such as test sources, build configuration, release artifacts, verification logs, and hash/checklist records, writes a provider-neutral reasoning request package, and records discovered project material; it does not run target-project commands, tests, builds, installers, or API calls.
+The evaluated project is read-only. The current collector inventories files, extracts project context, prepares a bounded reasoning context bundle, loads bounded governance material from manifest-declared standard paths when available, records passive deterministic-evidence signals such as test sources, build configuration, release artifacts, verification logs, and hash/checklist records, writes a provider-neutral reasoning request package, and records discovered project material; it does not run target-project commands, tests, builds, installers, or API calls. The `--out` directory must be outside the evaluated project so report generation never writes into the target project tree.
 
 Phase 1 supports only the no-op reasoning backend:
 
 ```powershell
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend none
+```
+
+For machine-readable success output, add `--json`:
+
+```powershell
+python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend none --json
 ```
 
 Model-backed evaluation is not implemented yet. The current backend boundary includes a no-op backend, a response-file backend, and a response parser/validator for the future structured model response.
@@ -54,6 +60,10 @@ List preserved evaluation runs from an existing report directory:
 
 ```powershell
 python -m single_project_evaluator list-runs --out reports
+```
+
+```powershell
+python -m single_project_evaluator list-runs --out reports --json
 ```
 
 ## Adoption Postures
