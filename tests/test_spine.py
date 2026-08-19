@@ -349,6 +349,13 @@ class SpineTests(unittest.TestCase):
         self.assertEqual(len(uncertainties), 1)
         self.assertIsNotNone(narrative)
 
+    def test_response_template_uses_declared_posture(self) -> None:
+        template = build_response_template("personal")
+
+        assessment, _, _, _, _ = parse_backend_response(template, expected_posture="personal")
+
+        self.assertEqual(assessment.posture_fitness, "Personal - Adequate")
+
     def test_parse_backend_response_accepts_valid_shape(self) -> None:
         response = {
             "assessment": {
@@ -527,6 +534,49 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(payload["release_eligibility"], "NOT APPLICABLE")
             self.assertFalse(payload["has_narrative"])
 
+    def test_cli_validate_response_can_require_declared_posture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            response_file = Path(tmp) / "response.json"
+            response_file.write_text(json.dumps(build_response_template("adoptable")), encoding="utf-8")
+            stdout = StringIO()
+
+            with redirect_stdout(stdout):
+                exit_code = main(
+                    [
+                        "validate-response",
+                        "--response-file",
+                        str(response_file),
+                        "--posture",
+                        AdoptionPosture.ADOPTABLE.value,
+                        "--json",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "ok")
+
+    def test_cli_validate_response_rejects_mismatched_declared_posture(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            response_file = Path(tmp) / "response.json"
+            response_file.write_text(json.dumps(build_response_template("shared")), encoding="utf-8")
+            stderr = StringIO()
+
+            with redirect_stderr(stderr), redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "validate-response",
+                        "--response-file",
+                        str(response_file),
+                        "--posture",
+                        AdoptionPosture.PERSONAL.value,
+                    ]
+                )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("posture_fitness", stderr.getvalue())
+            self.assertIn("personal", stderr.getvalue())
+
     def test_cli_validate_response_rejects_invalid_file_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             response_file = Path(tmp) / "response.json"
@@ -649,8 +699,8 @@ class SpineTests(unittest.TestCase):
             self.assertIn("text_snippets", bundle["prepared_context"])
             self.assertEqual(reasoning_request["context_bundle"], bundle)
             self.assertIn("response_contract", reasoning_request)
-            self.assertEqual(response_template, build_response_template())
-            parse_backend_response(response_template)
+            self.assertEqual(response_template, build_response_template("shared"))
+            parse_backend_response(response_template, expected_posture="shared")
 
     def test_cli_evaluate_can_print_json_success_output(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
@@ -682,6 +732,32 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(Path(payload["artifacts"]["latest_evaluation"]), output / "evaluation.json")
             self.assertEqual(Path(payload["artifacts"]["latest_response_template"]), output / "response-template.json")
             self.assertNotIn("Wrote run directory", stdout.getvalue())
+
+    def test_cli_writes_response_template_for_declared_posture(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.PERSONAL.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            response_template = json.loads((output / "response-template.json").read_text(encoding="utf-8"))
+            self.assertEqual(response_template["assessment"]["posture_fitness"], "Personal - Adequate")
+            parse_backend_response(response_template, expected_posture="personal")
 
     def test_cli_lists_preserved_runs(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
@@ -750,6 +826,227 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(Path(payload["index_path"]), output / "runs" / "index.json")
             self.assertEqual(len(payload["runs"]), 1)
             self.assertEqual(payload["runs"][0]["project_root"], str(project.resolve()))
+
+    def test_cli_show_run_displays_latest_run(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                show_exit = main(["show-run", "--out", str(output)])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(show_exit, 0)
+            output_text = stdout.getvalue()
+            run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            self.assertIn(f"Run: {run_index['runs'][0]['run_dir']}", output_text)
+            self.assertIn("Release eligibility: NOT APPLICABLE", output_text)
+            self.assertIn("response_template:", output_text)
+
+    def test_cli_show_run_can_select_run_and_print_json(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                first_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+                second_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.PERSONAL.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            selected = run_index["runs"][1]
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                show_exit = main(["show-run", "--out", str(output), "--run", selected["report_id"][:8], "--json"])
+
+            self.assertEqual(first_exit, 0)
+            self.assertEqual(second_exit, 0)
+            self.assertEqual(show_exit, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["run"]["report_id"], selected["report_id"])
+            self.assertEqual(payload["run"]["declared_posture"], selected["declared_posture"])
+            self.assertTrue(Path(payload["artifacts"]["evaluation"]).exists())
+            self.assertTrue(Path(payload["artifacts"]["response_template"]).exists())
+
+    def test_cli_show_run_reports_missing_selector_with_json_error(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            stdout = StringIO()
+            stderr = StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                show_exit = main(["show-run", "--out", str(output), "--run", "missing-run", "--json"])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(show_exit, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_type"], "ValueError")
+            self.assertIn("run not found", payload["error"])
+
+    def test_cli_validate_run_checks_latest_run(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                validate_exit = main(["validate-run", "--out", str(output)])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(validate_exit, 0)
+            output_text = stdout.getvalue()
+            self.assertIn("Valid run:", output_text)
+            self.assertIn("required_artifacts_exist: ok", output_text)
+            self.assertIn("response_template_contract: ok", output_text)
+
+    def test_cli_validate_run_can_print_json_success_output(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                validate_exit = main(["validate-run", "--out", str(output), "--json"])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(validate_exit, 0)
+            payload = json.loads(stdout.getvalue())
+            self.assertEqual(payload["status"], "ok")
+            check_names = {check["name"] for check in payload["checks"]}
+            self.assertIn("required_artifacts_exist", check_names)
+            self.assertIn("report_id_consistency", check_names)
+            self.assertIn("response_template_contract", check_names)
+
+    def test_cli_validate_run_reports_missing_artifact_with_json_error(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            missing_template = output / "runs" / run_index["runs"][0]["run_dir"] / "response-template.json"
+            missing_template.unlink()
+            stdout = StringIO()
+            stderr = StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                validate_exit = main(["validate-run", "--out", str(output), "--json"])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(validate_exit, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_type"], "ValueError")
+            self.assertIn("missing required artifacts", payload["error"])
+            self.assertIn("response_template", payload["error"])
 
     def test_cli_reports_missing_run_index_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as out_tmp:
@@ -852,6 +1149,54 @@ class SpineTests(unittest.TestCase):
             self.assertIn("## Backend Narrative", report)
             self.assertIn("The supplied response describes a usable evidence bundle.", report)
             self.assertIn("This report uses a parsed backend response.", report)
+
+    def test_cli_rejects_response_file_with_mismatched_declared_posture(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "response.json"
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+            response_file.write_text(
+                json.dumps(
+                    {
+                        "assessment": {
+                            "functional_completeness": 90,
+                            "implementation_quality": 85,
+                            "intent_fidelity": "Strong",
+                            "verification_confidence": "Partial",
+                            "posture_fitness": "Shared - Adequate",
+                            "lifecycle_fitness": "Appropriate",
+                            "release_eligibility": "NOT APPLICABLE",
+                            "blockers": 0,
+                        },
+                        "findings": [],
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stderr = StringIO()
+
+            with redirect_stderr(stderr), redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.PERSONAL.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("posture_fitness", stderr.getvalue())
+            self.assertIn("personal", stderr.getvalue())
+            self.assertFalse(output.exists())
 
     def test_cli_reports_missing_project_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as out_tmp:

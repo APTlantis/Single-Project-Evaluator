@@ -45,7 +45,7 @@ python -m single_project_evaluator evaluate --project D:\Some\Project --posture 
 
 Model-backed evaluation is not implemented yet. The current backend boundary includes a no-op backend, a response-file backend, and a response parser/validator for the future structured model response. Structured backend responses may include an optional markdown `narrative` field, which is preserved in `evaluation.json` and rendered in `report.md`.
 
-Each evaluation writes `response-template.json` as a fillable skeleton matching the structured backend response contract. Use it with `reasoning-request.json` or `reasoning-request.md` when preparing an external/manual reasoning response.
+Each evaluation writes `response-template.json` as a fillable skeleton matching the structured backend response contract and the run's declared posture. Use it with `reasoning-request.json` or `reasoning-request.md` when preparing an external/manual reasoning response.
 
 Validate a saved structured backend response before using it:
 
@@ -54,7 +54,7 @@ python -m single_project_evaluator validate-response --response-file reports\res
 ```
 
 ```powershell
-python -m single_project_evaluator validate-response --response-file reports\response.json --json
+python -m single_project_evaluator validate-response --response-file reports\response.json --posture shared --json
 ```
 
 Use a validated response file to produce populated assessment/report fields:
@@ -73,13 +73,28 @@ python -m single_project_evaluator list-runs --out reports
 python -m single_project_evaluator list-runs --out reports --json
 ```
 
+Show the latest preserved run, or select a specific run by run directory or report ID prefix:
+
+```powershell
+python -m single_project_evaluator show-run --out reports
+python -m single_project_evaluator show-run --out reports --run 20260819-233103Z-93dfff32
+python -m single_project_evaluator show-run --out reports --run 93dfff32 --json
+```
+
+Validate that a preserved run still has the expected artifact set and internal consistency:
+
+```powershell
+python -m single_project_evaluator validate-run --out reports
+python -m single_project_evaluator validate-run --out reports --run 93dfff32 --json
+```
+
 ## Command Contract
 
 - Exit `0`: command completed successfully.
 - Exit `1`: command input or runtime error reported cleanly without a traceback.
 - Exit `2`: command-line usage error or help fallback.
 
-When `--json` is present on `evaluate`, `validate-response`, or `list-runs`, success output is written as JSON to stdout. Clean command errors are written as JSON to stderr:
+When `--json` is present on `evaluate`, `validate-response`, `list-runs`, `show-run`, or `validate-run`, success output is written as JSON to stdout. Clean command errors are written as JSON to stderr:
 
 ```json
 {

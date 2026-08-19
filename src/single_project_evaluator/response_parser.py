@@ -23,11 +23,15 @@ POSTURE_FITNESS_PREFIXES = ("Personal - ", "Shared - ", "Adoptable - ")
 POSTURE_FITNESS_VALUES = {"Strong", "Adequate", "Marginal", "Weak", "Not assessed"}
 
 
-def parse_backend_response(data: dict[str, Any]) -> tuple[AssessmentProfile, list[Finding], dict[str, str], list[str], str | None]:
+def parse_backend_response(
+    data: dict[str, Any],
+    expected_posture: str | None = None,
+) -> tuple[AssessmentProfile, list[Finding], dict[str, str], list[str], str | None]:
     if not isinstance(data, dict):
         raise ResponseValidationError("Backend response must be a JSON object.")
 
     assessment = _parse_assessment(_required_dict(data, "assessment"))
+    _validate_expected_posture(assessment.posture_fitness, expected_posture)
     findings = [_parse_finding(item) for item in _required_list(data, "findings")]
     governance = data.get("governance_conformance", {})
     if not isinstance(governance, dict):
@@ -109,6 +113,16 @@ def _posture_fitness(data: dict[str, Any]) -> str:
     raise ResponseValidationError(
         "posture_fitness must start with Personal, Shared, or Adoptable and end with a valid fitness value."
     )
+
+
+def _validate_expected_posture(posture_fitness: str, expected_posture: str | None) -> None:
+    if expected_posture is None:
+        return
+    expected_prefix = expected_posture.strip().title() + " - "
+    if not posture_fitness.startswith(expected_prefix):
+        raise ResponseValidationError(
+            f"posture_fitness must start with {expected_prefix!r} for declared posture {expected_posture!r}."
+        )
 
 
 def _optional_string(value: Any, key: str) -> str | None:

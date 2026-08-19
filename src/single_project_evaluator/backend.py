@@ -90,7 +90,7 @@ class ResponseFileBackend:
         except json.JSONDecodeError as exc:
             raise ValueError(f"Response file is not valid JSON `{self.response_file}`: {exc}") from exc
 
-        return backend_result_from_response(data)
+        return backend_result_from_response(data, expected_posture=run.declared_posture.value)
 
 
 def create_backend(name: str, response_file: Path | None = None) -> NoopReasoningBackend | ResponseFileBackend:
@@ -103,8 +103,11 @@ def create_backend(name: str, response_file: Path | None = None) -> NoopReasonin
     raise ValueError(f"Unsupported reasoning backend: {name}")
 
 
-def backend_result_from_response(data: dict[str, Any]) -> BackendResult:
-    assessment, findings, governance_conformance, uncertainties, narrative = parse_backend_response(data)
+def backend_result_from_response(data: dict[str, Any], expected_posture: str | None = None) -> BackendResult:
+    assessment, findings, governance_conformance, uncertainties, narrative = parse_backend_response(
+        data,
+        expected_posture=expected_posture,
+    )
     return BackendResult(
         assessment=assessment,
         findings=findings,

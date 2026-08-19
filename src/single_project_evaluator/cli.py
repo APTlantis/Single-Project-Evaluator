@@ -19,6 +19,7 @@ from .models import (
 )
 from .reports import write_evaluation_artifacts
 from .response_parser import parse_backend_response
+from .serialization import evaluation_from_dict
 
 
 EXIT_OK = 0
@@ -45,6 +46,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "list-runs":
         try:
             return list_runs_command(args)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            _print_error(exc, json_output=args.json)
+            return EXIT_COMMAND_ERROR
+    if args.command == "show-run":
+        try:
+            return show_run_command(args)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            _print_error(exc, json_output=args.json)
+            return EXIT_COMMAND_ERROR
+    if args.command == "validate-run":
+        try:
+            return validate_run_command(args)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            _print_error(exc, json_output=args.json)
+            return EXIT_COMMAND_ERROR
+    if args.command == "complete-run":
+        try:
+            return complete_run_command(args)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             _print_error(exc, json_output=args.json)
             return EXIT_COMMAND_ERROR
@@ -101,6 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Path to the backend response JSON file to validate.",
     )
     validate_response.add_argument(
+        "--posture",
+        choices=[posture.value for posture in AdoptionPosture],
+        help="Optionally require posture_fitness to match a declared adoption posture.",
+    )
+    validate_response.add_argument(
         "--json",
         action="store_true",
         help="Print machine-readable success or error output instead of text.",
@@ -112,6 +136,56 @@ def build_parser() -> argparse.ArgumentParser:
     )
     list_runs.add_argument("--out", default="reports", help="Directory containing generated reports.")
     list_runs.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable success or error output instead of text.",
+    )
+
+    show_run = subparsers.add_parser(
+        "show-run",
+        help="Show a preserved evaluation run summary and artifact paths.",
+    )
+    show_run.add_argument("--out", default="reports", help="Directory containing generated reports.")
+    show_run.add_argument(
+        "--run",
+        help="Run directory name or report ID/prefix. Defaults to the newest indexed run.",
+    )
+    show_run.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable success or error output instead of text.",
+    )
+
+    validate_run = subparsers.add_parser(
+        "validate-run",
+        help="Validate a preserved evaluation run's artifact integrity.",
+    )
+    validate_run.add_argument("--out", default="reports", help="Directory containing generated reports.")
+    validate_run.add_argument(
+        "--run",
+        help="Run directory name or report ID/prefix. Defaults to the newest indexed run.",
+    )
+    validate_run.add_argument(
+        "--json",
+        action="store_true",
+        help="Print machine-readable success or error output instead of text.",
+    )
+
+    complete_run = subparsers.add_parser(
+        "complete-run",
+        help="Apply a structured response file to a preserved run without recollecting the target project.",
+    )
+    complete_run.add_argument("--out", default="reports", help="Directory containing generated reports.")
+    complete_run.add_argument(
+        "--run",
+        help="Source run directory name or report ID/prefix. Defaults to the newest indexed run.",
+    )
+    complete_run.add_argument(
+        "--response-file",
+        required=True,
+        help="Structured backend response JSON file to apply to the preserved run.",
+    )
+    complete_run.add_argument(
         "--json",
         action="store_true",
         help="Print machine-readable success or error output instead of text.",
@@ -184,7 +258,10 @@ def evaluate_command(args: argparse.Namespace) -> int:
 def validate_response_command(args: argparse.Namespace) -> int:
     response_file = Path(args.response_file)
     data = json.loads(response_file.read_text(encoding="utf-8"))
-    assessment, findings, governance_conformance, uncertainties, narrative = parse_backend_response(data)
+    assessment, findings, governance_conformance, uncertainties, narrative = parse_backend_response(
+        data,
+        expected_posture=args.posture,
+    )
     if args.json:
         print(
             json.dumps(
@@ -213,14 +290,7 @@ def validate_response_command(args: argparse.Namespace) -> int:
 
 
 def list_runs_command(args: argparse.Namespace) -> int:
-    index_path = Path(args.out) / "runs" / "index.json"
-    if not index_path.exists():
-        raise FileNotFoundError(f"run index not found: {index_path}")
-
-    data = json.loads(index_path.read_text(encoding="utf-8"))
-    runs = data.get("runs")
-    if not isinstance(runs, list):
-        raise ValueError(f"run index has no runs list: {index_path}")
+    index_path, runs = _read_run_index(Path(args.out))
     if args.json:
         print(
             json.dumps(
@@ -256,6 +326,149 @@ def list_runs_command(args: argparse.Namespace) -> int:
                 ]
             )
         )
+    return EXIT_OK
+
+
+def show_run_command(args: argparse.Namespace) -> int:
+    output_dir = Path(args.out)
+    index_path, runs = _read_run_index(output_dir)
+    entry = _select_run(runs, args.run, index_path)
+    run_dir = output_dir / "runs" / str(entry["run_dir"])
+    evaluation_path = run_dir / "evaluation.json"
+    if not evaluation_path.exists():
+        raise FileNotFoundError(f"evaluation artifact not found for run `{entry['run_dir']}`: {evaluation_path}")
+    evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+    artifacts = _run_artifact_paths(run_dir)
+    payload = {
+        "status": "ok",
+        "index_path": str(index_path),
+        "run_dir": str(run_dir),
+        "run": evaluation.get("run", {}),
+        "assessment": evaluation.get("assessment", {}),
+        "finding_count": len(evaluation.get("findings", [])),
+        "governance_conformance_entries": len(evaluation.get("governance_conformance", {})),
+        "uncertainties": len(evaluation.get("uncertainties", [])),
+        "has_narrative": evaluation.get("narrative") is not None,
+        "artifacts": {key: str(path) for key, path in artifacts.items()},
+    }
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return EXIT_OK
+
+    run = payload["run"]
+    assessment = payload["assessment"]
+    print(f"Run: {entry['run_dir']}")
+    print(f"Report ID: {_display_value(run.get('report_id'))}")
+    print(f"Timestamp UTC: {_display_value(run.get('timestamp_utc'))}")
+    print(f"Project: {_display_value(run.get('project_root'))}")
+    print(f"Posture: {_display_value(run.get('declared_posture'))}")
+    print(f"Backend: {_display_value(run.get('reasoning_provider'))}")
+    print(f"Model: {_display_value(run.get('model_identifier'))}")
+    print(f"Release eligibility: {_display_value(assessment.get('release_eligibility'))}")
+    print(f"Blockers: {_display_value(assessment.get('blockers'))}")
+    print(f"Findings: {payload['finding_count']}")
+    print(f"Governance conformance entries: {payload['governance_conformance_entries']}")
+    print(f"Uncertainties: {payload['uncertainties']}")
+    print(f"Narrative: {'present' if payload['has_narrative'] else 'absent'}")
+    print("Artifacts:")
+    for key, path in artifacts.items():
+        print(f"- {key}: {path}")
+    return EXIT_OK
+
+
+def validate_run_command(args: argparse.Namespace) -> int:
+    output_dir = Path(args.out)
+    index_path, runs = _read_run_index(output_dir)
+    entry = _select_run(runs, args.run, index_path)
+    run_dir = output_dir / "runs" / str(entry["run_dir"])
+    artifacts = _run_artifact_paths(run_dir)
+    checks = _validate_run_artifacts(entry, artifacts)
+    payload = {
+        "status": "ok",
+        "index_path": str(index_path),
+        "run_dir": str(run_dir),
+        "checks": checks,
+    }
+
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return EXIT_OK
+
+    print(f"Valid run: {entry['run_dir']}")
+    for check in checks:
+        print(f"- {check['name']}: {check['status']}")
+    return EXIT_OK
+
+
+def complete_run_command(args: argparse.Namespace) -> int:
+    output_dir = Path(args.out)
+    index_path, runs = _read_run_index(output_dir)
+    source_entry = _select_run(runs, args.run, index_path)
+    source_run_dir = output_dir / "runs" / str(source_entry["run_dir"])
+    source_evaluation_path = source_run_dir / "evaluation.json"
+    if not source_evaluation_path.exists():
+        raise FileNotFoundError(
+            f"evaluation artifact not found for source run `{source_entry['run_dir']}`: {source_evaluation_path}"
+        )
+
+    source_evaluation = evaluation_from_dict(json.loads(source_evaluation_path.read_text(encoding="utf-8")))
+    response_file = Path(args.response_file)
+    response_data = json.loads(response_file.read_text(encoding="utf-8"))
+    assessment, findings, governance_conformance, uncertainties, narrative = parse_backend_response(
+        response_data,
+        expected_posture=source_evaluation.run.declared_posture.value,
+    )
+    run = EvaluationRun(
+        report_id=str(uuid4()),
+        timestamp_utc=datetime.now(UTC).replace(microsecond=0).isoformat(),
+        project_root=source_evaluation.run.project_root,
+        declared_posture=source_evaluation.run.declared_posture,
+        evaluator_version=__version__,
+        reasoning_provider="response-file",
+        model_identifier=response_file.name,
+        configuration={
+            "active_target_commands": False,
+            "backend": "response-file",
+            "response_file": str(response_file),
+            "completed_from_run_dir": source_entry["run_dir"],
+            "completed_from_report_id": source_evaluation.run.report_id,
+            "reused_preserved_context": True,
+        },
+    )
+    completed_evaluation = Evaluation(
+        run=run,
+        evidence=source_evaluation.evidence,
+        context=source_evaluation.context,
+        prepared_context=source_evaluation.prepared_context,
+        assessment=assessment,
+        findings=findings,
+        governance_conformance=governance_conformance,
+        uncertainties=uncertainties,
+        narrative=narrative,
+    )
+
+    artifacts = write_evaluation_artifacts(completed_evaluation, output_dir)
+    payload = {
+        "status": "ok",
+        "source_run_dir": str(source_run_dir),
+        "source_report_id": source_evaluation.run.report_id,
+        "run_dir": str(artifacts["run_dir"]),
+        "artifacts": {key: str(value) for key, value in artifacts.items()},
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2))
+        return EXIT_OK
+
+    print(f"Completed source run: {source_entry['run_dir']}")
+    print(f"Wrote run directory: {artifacts['run_dir']}")
+    print(f"Wrote evaluation: {artifacts['latest_evaluation']}")
+    print(f"Wrote report: {artifacts['latest_report']}")
+    print(f"Wrote run record: {artifacts['latest_run_record']}")
+    print(f"Wrote context bundle: {artifacts['latest_context_bundle']}")
+    print(f"Wrote reasoning request: {artifacts['latest_reasoning_request']}")
+    print(f"Wrote response template: {artifacts['latest_response_template']}")
+    print(f"Wrote run index: {artifacts['run_index']}")
     return EXIT_OK
 
 
@@ -298,3 +511,99 @@ def _is_relative_to(path: Path, possible_parent: Path) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _read_run_index(output_dir: Path) -> tuple[Path, list[dict]]:
+    index_path = output_dir / "runs" / "index.json"
+    if not index_path.exists():
+        raise FileNotFoundError(f"run index not found: {index_path}")
+    data = json.loads(index_path.read_text(encoding="utf-8"))
+    runs = data.get("runs")
+    if not isinstance(runs, list):
+        raise ValueError(f"run index has no runs list: {index_path}")
+    if not all(isinstance(entry, dict) for entry in runs):
+        raise ValueError(f"run index contains a non-object entry: {index_path}")
+    return index_path, runs
+
+
+def _select_run(runs: list[dict], requested_run: str | None, index_path: Path) -> dict:
+    if not runs:
+        raise ValueError(f"run index has no runs: {index_path}")
+    if requested_run is None:
+        return runs[0]
+
+    matches = [
+        entry for entry in runs
+        if str(entry.get("run_dir") or "").startswith(requested_run)
+        or str(entry.get("report_id") or "").startswith(requested_run)
+    ]
+    if not matches:
+        raise ValueError(f"run not found in index `{index_path}`: {requested_run}")
+    if len(matches) > 1:
+        raise ValueError(f"run selector is ambiguous in index `{index_path}`: {requested_run}")
+    return matches[0]
+
+
+def _run_artifact_paths(run_dir: Path) -> dict[str, Path]:
+    names = {
+        "evaluation": "evaluation.json",
+        "report": "report.md",
+        "run_record": "run-record.json",
+        "context_bundle": "context-bundle.json",
+        "reasoning_request": "reasoning-request.json",
+        "reasoning_request_md": "reasoning-request.md",
+        "response_template": "response-template.json",
+    }
+    return {key: run_dir / filename for key, filename in names.items()}
+
+
+def _validate_run_artifacts(entry: dict, artifacts: dict[str, Path]) -> list[dict[str, str]]:
+    checks: list[dict[str, str]] = []
+
+    def pass_check(name: str) -> None:
+        checks.append({"name": name, "status": "ok"})
+
+    missing = [key for key, path in artifacts.items() if not path.exists()]
+    if missing:
+        raise ValueError("run is missing required artifacts: " + ", ".join(missing))
+    pass_check("required_artifacts_exist")
+
+    evaluation = json.loads(artifacts["evaluation"].read_text(encoding="utf-8"))
+    run_record = json.loads(artifacts["run_record"].read_text(encoding="utf-8"))
+    context_bundle = json.loads(artifacts["context_bundle"].read_text(encoding="utf-8"))
+    reasoning_request = json.loads(artifacts["reasoning_request"].read_text(encoding="utf-8"))
+    response_template = json.loads(artifacts["response_template"].read_text(encoding="utf-8"))
+    pass_check("json_artifacts_parse")
+
+    report_id = _required_mapping(evaluation, "evaluation").get("run", {}).get("report_id")
+    if not report_id or run_record.get("report_id") != report_id:
+        raise ValueError("evaluation.json and run-record.json report IDs do not match.")
+    if entry.get("report_id") != report_id:
+        raise ValueError("run index and evaluation.json report IDs do not match.")
+    pass_check("report_id_consistency")
+
+    bundle_run = _required_mapping(context_bundle, "context-bundle.json").get("run", {})
+    if bundle_run.get("report_id") != report_id:
+        raise ValueError("context-bundle.json run record does not match evaluation.json.")
+    request_bundle = _required_mapping(reasoning_request, "reasoning-request.json").get("context_bundle", {})
+    request_run = _required_mapping(request_bundle, "reasoning-request context_bundle").get("run", {})
+    if request_run.get("report_id") != report_id:
+        raise ValueError("reasoning-request.json context bundle does not match evaluation.json.")
+    pass_check("context_bundle_consistency")
+
+    parse_backend_response(response_template)
+    pass_check("response_template_contract")
+
+    if not artifacts["report"].read_text(encoding="utf-8").strip():
+        raise ValueError("report.md is empty.")
+    if not artifacts["reasoning_request_md"].read_text(encoding="utf-8").strip():
+        raise ValueError("reasoning-request.md is empty.")
+    pass_check("markdown_artifacts_nonempty")
+
+    return checks
+
+
+def _required_mapping(value: object, label: str) -> dict:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a JSON object.")
+    return value

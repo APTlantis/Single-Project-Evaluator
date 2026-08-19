@@ -46,7 +46,8 @@ Current status:
 - Provider-neutral reasoning request package implemented.
 - Structured backend response validation implemented.
 - Optional backend narrative preservation and report rendering implemented for response-file runs.
-- Fillable `response-template.json` artifact implemented to bridge prepared context to response-file evaluation.
+- Posture-aware response validation and fillable `response-template.json` artifact implemented to bridge prepared context to response-file evaluation.
+- Preserved run inspection and integrity validation implemented with `list-runs`, `show-run`, and `validate-run`, including JSON output.
 - Model-backed evaluation not yet implemented.
 
 ### Phase 2: Core Evaluation Workflow
@@ -75,7 +76,7 @@ Objectives:
 Objectives:
 
 - Stabilize command contract.
-- Add machine-readable output guarantees. Started for `evaluate --json`, `validate-response --json`, and `list-runs --json` success/error output.
+- Add machine-readable output guarantees. Started for `evaluate --json`, `validate-response --json`, `list-runs --json`, `show-run --json`, and `validate-run --json` success/error output.
 - Define exit codes. Started with success `0`, clean command error `1`, and usage/help fallback `2`.
 - Document examples.
 - Preserve release evidence.

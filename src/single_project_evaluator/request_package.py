@@ -60,14 +60,15 @@ def build_reasoning_request(context_bundle: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def build_response_template() -> dict[str, Any]:
+def build_response_template(declared_posture: str = "shared") -> dict[str, Any]:
+    posture_label = declared_posture.strip().title()
     return {
         "assessment": {
             "functional_completeness": None,
             "implementation_quality": None,
             "intent_fidelity": "Ambiguous",
             "verification_confidence": "Unverified",
-            "posture_fitness": "Shared - Adequate",
+            "posture_fitness": f"{posture_label} - Adequate",
             "lifecycle_fitness": "Ambiguous",
             "release_eligibility": "NOT APPLICABLE",
             "blockers": 0,

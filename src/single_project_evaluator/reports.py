@@ -33,7 +33,10 @@ def write_evaluation_artifacts(evaluation: Evaluation, output_dir: Path) -> dict
     paths["context_bundle"].write_text(json.dumps(context_bundle, indent=2), encoding="utf-8")
     paths["reasoning_request"].write_text(json.dumps(reasoning_request, indent=2), encoding="utf-8")
     paths["reasoning_request_md"].write_text(render_reasoning_request_markdown(reasoning_request), encoding="utf-8")
-    paths["response_template"].write_text(json.dumps(build_response_template(), indent=2), encoding="utf-8")
+    paths["response_template"].write_text(
+        json.dumps(build_response_template(evaluation.run.declared_posture.value), indent=2),
+        encoding="utf-8",
+    )
     paths["report"].write_text(render_markdown_report(evaluation), encoding="utf-8")
 
     latest_paths = _write_latest_aliases(paths, output_dir)
