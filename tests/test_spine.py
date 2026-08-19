@@ -29,6 +29,8 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(evidence.files_examined, 2)
             self.assertIn("readme", evidence.detected_records)
             self.assertIn("manifest", evidence.detected_records)
+            self.assertEqual(len(evidence.authority_records), 2)
+            self.assertTrue(evidence.authority_records[0].sha256)
 
     def test_collect_project_evidence_ignores_generated_noise(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -45,13 +47,35 @@ class SpineTests(unittest.TestCase):
             evidence = collect_project_evidence(root)
 
             all_paths = [file.path for file in evidence.files]
+            roles = {file.path: file.role for file in evidence.files}
             self.assertIn("docs/Project Proposal - Example.md", all_paths)
             self.assertIn("docs/Desktop Application Release Standard.md", all_paths)
             self.assertNotIn("bin/Release/net10.0-windows/win-x64/netstandard.dll", all_paths)
+            self.assertEqual(roles["docs/Project Proposal - Example.md"], "documentation")
             self.assertEqual(
                 evidence.detected_records["governance"],
                 ["docs/Desktop Application Release Standard.md"],
             )
+            self.assertEqual(len(evidence.authority_records), 2)
+            records_by_path = {record.path: record for record in evidence.authority_records}
+            self.assertIn("# PPS", records_by_path["docs/Project Proposal - Example.md"].excerpt)
+
+    def test_collect_project_evidence_classifies_release_artifacts(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            artifact_dir = root / "artifacts" / "publish" / "win-x64"
+            artifact_dir.mkdir(parents=True)
+            (artifact_dir / "README.md").write_text("# Packaged readme\n", encoding="utf-8")
+
+            evidence = collect_project_evidence(root)
+
+            self.assertEqual(evidence.files[0].path, "artifacts/publish/win-x64/README.md")
+            self.assertEqual(evidence.files[0].role, "release_artifact")
+            self.assertEqual(
+                evidence.detected_records["release_documentation"],
+                ["artifacts/publish/win-x64/README.md"],
+            )
+            self.assertNotIn("readme", evidence.detected_records)
 
     def test_git_commit_uses_command_scoped_safe_directory(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

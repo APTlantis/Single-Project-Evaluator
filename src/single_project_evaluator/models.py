@@ -40,12 +40,22 @@ class FileEvidence:
 
 
 @dataclass(frozen=True)
+class AuthorityRecord:
+    path: str
+    record_type: str
+    size_bytes: int
+    sha256: str
+    excerpt: str
+
+
+@dataclass(frozen=True)
 class ProjectEvidence:
     root: str
     project_name: str
     files_examined: int
     files: list[FileEvidence] = field(default_factory=list)
     detected_records: dict[str, list[str]] = field(default_factory=dict)
+    authority_records: list[AuthorityRecord] = field(default_factory=list)
     git_commit: str | None = None
     notes: list[str] = field(default_factory=list)
 

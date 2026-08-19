@@ -58,6 +58,32 @@ def render_markdown_report(evaluation: Evaluation) -> str:
     else:
         lines.append("- No common project records were detected by the Phase 1 collector.")
 
+    lines.extend(["", "## Authority Record Snapshots", ""])
+    if evaluation.evidence.authority_records:
+        for record in evaluation.evidence.authority_records[:10]:
+            lines.extend(
+                [
+                    f"### {record.record_type}: `{record.path}`",
+                    "",
+                    f"- Size: {record.size_bytes} bytes",
+                    f"- SHA-256: `{record.sha256}`",
+                    "",
+                    "```text",
+                    record.excerpt or "[empty file]",
+                    "```",
+                    "",
+                ]
+            )
+    else:
+        lines.append("- No authority record snapshots were collected.")
+
+    lines.extend(["", "## Evidence Notes", ""])
+    if evaluation.evidence.notes:
+        for note in evaluation.evidence.notes:
+            lines.append(f"- {note}")
+    else:
+        lines.append("- No evidence collection notes.")
+
     lines.extend(["", "## Findings", ""])
     for finding in evaluation.findings:
         lines.extend(
