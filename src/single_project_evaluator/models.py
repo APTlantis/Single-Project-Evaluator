@@ -186,6 +186,7 @@ class Evaluation:
     assessment: AssessmentProfile
     findings: list[Finding]
     governance_conformance: dict[str, str] = field(default_factory=dict)
+    uncertainties: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

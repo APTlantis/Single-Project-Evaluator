@@ -106,9 +106,10 @@ def evaluate_command(args: argparse.Namespace) -> int:
     )
 
     artifacts = write_evaluation_artifacts(evaluation, output_dir)
-    print(f"Wrote evaluation: {artifacts['evaluation']}")
-    print(f"Wrote report: {artifacts['report']}")
-    print(f"Wrote run record: {artifacts['run_record']}")
-    print(f"Wrote context bundle: {artifacts['context_bundle']}")
-    print(f"Wrote reasoning request: {artifacts['reasoning_request']}")
+    print(f"Wrote run directory: {artifacts['run_dir']}")
+    print(f"Wrote evaluation: {artifacts['latest_evaluation']}")
+    print(f"Wrote report: {artifacts['latest_report']}")
+    print(f"Wrote run record: {artifacts['latest_run_record']}")
+    print(f"Wrote context bundle: {artifacts['latest_context_bundle']}")
+    print(f"Wrote reasoning request: {artifacts['latest_reasoning_request']}")
     return 0

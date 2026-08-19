@@ -289,13 +289,15 @@ class SpineTests(unittest.TestCase):
                 }
             ],
             "governance_conformance": {"DRS": "not evaluated"},
+            "uncertainties": ["No tests were supplied."],
         }
 
-        assessment, findings, governance = parse_backend_response(response)
+        assessment, findings, governance, uncertainties = parse_backend_response(response)
 
         self.assertEqual(assessment.functional_completeness, 80)
         self.assertEqual(findings[0].finding_class.value, "observation")
         self.assertEqual(governance["DRS"], "not evaluated")
+        self.assertEqual(uncertainties, ["No tests were supplied."])
 
     def test_parse_backend_response_rejects_invalid_scores(self) -> None:
         response = {
@@ -305,6 +307,42 @@ class SpineTests(unittest.TestCase):
                 "intent_fidelity": "Strong",
                 "verification_confidence": "Partial",
                 "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "NOT APPLICABLE",
+                "blockers": 0,
+            },
+            "findings": [],
+        }
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_rejects_invalid_assessment_vocabulary(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": None,
+                "implementation_quality": None,
+                "intent_fidelity": "Pretty Good",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "NOT APPLICABLE",
+                "blockers": 0,
+            },
+            "findings": [],
+        }
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_rejects_invalid_posture_fitness(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": None,
+                "implementation_quality": None,
+                "intent_fidelity": "Strong",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Pretty Good",
                 "lifecycle_fitness": "Appropriate",
                 "release_eligibility": "NOT APPLICABLE",
                 "blockers": 0,
@@ -343,10 +381,16 @@ class SpineTests(unittest.TestCase):
             self.assertTrue((output / "context-bundle.json").exists())
             self.assertTrue((output / "reasoning-request.json").exists())
             self.assertTrue((output / "reasoning-request.md").exists())
+            run_dirs = list((output / "runs").iterdir())
+            self.assertEqual(len(run_dirs), 1)
+            self.assertTrue((run_dirs[0] / "evaluation.json").exists())
+            self.assertTrue((run_dirs[0] / "report.md").exists())
 
             data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            run_data = json.loads((run_dirs[0] / "evaluation.json").read_text(encoding="utf-8"))
             bundle = json.loads((output / "context-bundle.json").read_text(encoding="utf-8"))
             reasoning_request = json.loads((output / "reasoning-request.json").read_text(encoding="utf-8"))
+            self.assertEqual(data, run_data)
             self.assertEqual(data["run"]["declared_posture"], "shared")
             self.assertEqual(data["run"]["reasoning_provider"], "none")
             self.assertEqual(data["run"]["configuration"]["backend"], "none")
@@ -391,6 +435,7 @@ class SpineTests(unittest.TestCase):
                             }
                         ],
                         "governance_conformance": {"PPS": "not evaluated"},
+                        "uncertainties": ["The response was supplied from a test fixture."],
                     }
                 ),
                 encoding="utf-8",
@@ -415,9 +460,14 @@ class SpineTests(unittest.TestCase):
 
             self.assertEqual(exit_code, 0)
             data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            report = (output / "report.md").read_text(encoding="utf-8")
             self.assertEqual(data["run"]["reasoning_provider"], "response-file")
             self.assertEqual(data["assessment"]["functional_completeness"], 90)
             self.assertEqual(data["governance_conformance"]["PPS"], "not evaluated")
+            self.assertEqual(data["uncertainties"], ["The response was supplied from a test fixture."])
+            self.assertIn("PPS: not evaluated", report)
+            self.assertIn("The response was supplied from a test fixture.", report)
+            self.assertIn("This report uses a parsed backend response.", report)
 
     def test_cli_reports_missing_project_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as out_tmp:
@@ -434,6 +484,35 @@ class SpineTests(unittest.TestCase):
                         AdoptionPosture.PERSONAL.value,
                         "--out",
                         str(Path(out_tmp) / "out"),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("error:", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_cli_reports_invalid_response_file_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            response = Path(out_tmp) / "bad-response.json"
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+            response.write_text("{not-json", encoding="utf-8")
+            stderr = StringIO()
+
+            with redirect_stderr(stderr), redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(Path(out_tmp) / "out"),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response),
                     ]
                 )
 

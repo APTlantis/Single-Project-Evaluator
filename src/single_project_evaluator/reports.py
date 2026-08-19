@@ -1,39 +1,57 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 
 from .models import Evaluation, FindingClass
 from .request_package import build_reasoning_request, render_reasoning_request_markdown
 
 
+ARTIFACT_FILENAMES = {
+    "evaluation": "evaluation.json",
+    "report": "report.md",
+    "run_record": "run-record.json",
+    "context_bundle": "context-bundle.json",
+    "reasoning_request": "reasoning-request.json",
+    "reasoning_request_md": "reasoning-request.md",
+}
+
+
 def write_evaluation_artifacts(evaluation: Evaluation, output_dir: Path) -> dict[str, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
-    evaluation_json = output_dir / "evaluation.json"
-    report_md = output_dir / "report.md"
-    run_record_json = output_dir / "run-record.json"
-    context_bundle_json = output_dir / "context-bundle.json"
-    reasoning_request_json = output_dir / "reasoning-request.json"
-    reasoning_request_md = output_dir / "reasoning-request.md"
+    run_dir = output_dir / "runs" / _run_directory_name(evaluation)
+    run_dir.mkdir(parents=True, exist_ok=False)
+    paths = {key: run_dir / filename for key, filename in ARTIFACT_FILENAMES.items()}
 
     data = evaluation.to_dict()
     context_bundle = _context_bundle(data)
     reasoning_request = build_reasoning_request(context_bundle)
-    evaluation_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
-    run_record_json.write_text(json.dumps(data["run"], indent=2), encoding="utf-8")
-    context_bundle_json.write_text(json.dumps(context_bundle, indent=2), encoding="utf-8")
-    reasoning_request_json.write_text(json.dumps(reasoning_request, indent=2), encoding="utf-8")
-    reasoning_request_md.write_text(render_reasoning_request_markdown(reasoning_request), encoding="utf-8")
-    report_md.write_text(render_markdown_report(evaluation), encoding="utf-8")
+    paths["evaluation"].write_text(json.dumps(data, indent=2), encoding="utf-8")
+    paths["run_record"].write_text(json.dumps(data["run"], indent=2), encoding="utf-8")
+    paths["context_bundle"].write_text(json.dumps(context_bundle, indent=2), encoding="utf-8")
+    paths["reasoning_request"].write_text(json.dumps(reasoning_request, indent=2), encoding="utf-8")
+    paths["reasoning_request_md"].write_text(render_reasoning_request_markdown(reasoning_request), encoding="utf-8")
+    paths["report"].write_text(render_markdown_report(evaluation), encoding="utf-8")
 
-    return {
-        "evaluation": evaluation_json,
-        "report": report_md,
-        "run_record": run_record_json,
-        "context_bundle": context_bundle_json,
-        "reasoning_request": reasoning_request_json,
-        "reasoning_request_md": reasoning_request_md,
-    }
+    latest_paths = _write_latest_aliases(paths, output_dir)
+    return {"run_dir": run_dir, **paths, **latest_paths}
+
+
+def _run_directory_name(evaluation: Evaluation) -> str:
+    timestamp = evaluation.run.timestamp_utc
+    timestamp = timestamp.replace("+00:00", "Z").replace(":", "").replace("-", "")
+    timestamp = timestamp.replace("T", "-")
+    return f"{timestamp}-{evaluation.run.report_id[:8]}"
+
+
+def _write_latest_aliases(paths: dict[str, Path], output_dir: Path) -> dict[str, Path]:
+    latest_paths: dict[str, Path] = {}
+    for key, filename in ARTIFACT_FILENAMES.items():
+        latest = output_dir / filename
+        shutil.copyfile(paths[key], latest)
+        latest_paths[f"latest_{key}"] = latest
+    return latest_paths
 
 
 def _context_bundle(evaluation_data: dict) -> dict:

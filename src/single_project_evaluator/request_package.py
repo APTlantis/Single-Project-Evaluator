@@ -42,7 +42,7 @@ REQUIRED_RESPONSE_CONTRACT: dict[str, Any] = {
     "governance_conformance": {
         "STANDARD": "percentage/count string when conformance has actually been evaluated"
     },
-    "uncertainties": ["important limits in supplied evidence"],
+    "uncertainties": ["important limits in supplied evidence or reasoning"],
 }
 
 

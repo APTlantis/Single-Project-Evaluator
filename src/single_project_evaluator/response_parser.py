@@ -15,6 +15,14 @@ class ResponseValidationError(ValueError):
     pass
 
 
+INTENT_FIDELITY_VALUES = {"Strong", "Moderate", "Weak", "Contradictory", "Ambiguous"}
+VERIFICATION_CONFIDENCE_VALUES = {"Strong", "Substantial", "Partial", "Weak", "Unverified"}
+LIFECYCLE_FITNESS_VALUES = {"Appropriate", "Ahead of Evidence", "Behind Actual State", "Ambiguous"}
+RELEASE_ELIGIBILITY_VALUES = {"PASS", "BLOCKED", "NOT APPLICABLE"}
+POSTURE_FITNESS_PREFIXES = ("Personal - ", "Shared - ", "Adoptable - ")
+POSTURE_FITNESS_VALUES = {"Strong", "Adequate", "Marginal", "Weak", "Not assessed"}
+
+
 def parse_backend_response(data: dict[str, Any]) -> tuple[AssessmentProfile, list[Finding], dict[str, str], list[str]]:
     if not isinstance(data, dict):
         raise ResponseValidationError("Backend response must be a JSON object.")
@@ -35,11 +43,11 @@ def _parse_assessment(data: dict[str, Any]) -> AssessmentProfile:
     return AssessmentProfile(
         functional_completeness=_optional_percent(data.get("functional_completeness"), "functional_completeness"),
         implementation_quality=_optional_percent(data.get("implementation_quality"), "implementation_quality"),
-        intent_fidelity=_required_string(data, "intent_fidelity"),
-        verification_confidence=_required_string(data, "verification_confidence"),
-        posture_fitness=_required_string(data, "posture_fitness"),
-        lifecycle_fitness=_required_string(data, "lifecycle_fitness"),
-        release_eligibility=_required_string(data, "release_eligibility"),
+        intent_fidelity=_enum_string(data, "intent_fidelity", INTENT_FIDELITY_VALUES),
+        verification_confidence=_enum_string(data, "verification_confidence", VERIFICATION_CONFIDENCE_VALUES),
+        posture_fitness=_posture_fitness(data),
+        lifecycle_fitness=_enum_string(data, "lifecycle_fitness", LIFECYCLE_FITNESS_VALUES),
+        release_eligibility=_enum_string(data, "release_eligibility", RELEASE_ELIGIBILITY_VALUES),
         blockers=_nonnegative_int(data.get("blockers"), "blockers"),
     )
 
@@ -80,6 +88,26 @@ def _required_string(data: dict[str, Any], key: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ResponseValidationError(f"{key} must be a non-empty string.")
     return value
+
+
+def _enum_string(data: dict[str, Any], key: str, allowed_values: set[str]) -> str:
+    value = _required_string(data, key)
+    if value not in allowed_values:
+        allowed = ", ".join(sorted(allowed_values))
+        raise ResponseValidationError(f"{key} must be one of: {allowed}.")
+    return value
+
+
+def _posture_fitness(data: dict[str, Any]) -> str:
+    value = _required_string(data, "posture_fitness")
+    for prefix in POSTURE_FITNESS_PREFIXES:
+        if value.startswith(prefix):
+            suffix = value[len(prefix):]
+            if suffix in POSTURE_FITNESS_VALUES:
+                return value
+    raise ResponseValidationError(
+        "posture_fitness must start with Personal, Shared, or Adoptable and end with a valid fitness value."
+    )
 
 
 def _optional_string(value: Any, key: str) -> str | None:
