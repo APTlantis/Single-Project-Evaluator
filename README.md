@@ -21,8 +21,15 @@ The evaluator currently writes:
 - `evaluation.json`
 - `report.md`
 - `run-record.json`
+- `context-bundle.json`
 
-The evaluated project is read-only. The current collector inventories files and records discovered project material; it does not run target-project commands, tests, builds, installers, or API calls.
+The evaluated project is read-only. The current collector inventories files, extracts project context, prepares a bounded reasoning context bundle, and records discovered project material; it does not run target-project commands, tests, builds, installers, or API calls.
+
+Phase 1 supports only the no-op reasoning backend:
+
+```powershell
+python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend none
+```
 
 ## Adoption Postures
 

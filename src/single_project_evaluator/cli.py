@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -23,7 +24,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "evaluate":
-        return evaluate_command(args)
+        try:
+            return evaluate_command(args)
+        except (FileNotFoundError, NotADirectoryError, ValueError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
 
     parser.print_help()
     return 2

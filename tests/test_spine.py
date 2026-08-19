@@ -5,6 +5,7 @@ import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
@@ -274,6 +275,28 @@ class SpineTests(unittest.TestCase):
             self.assertNotIn("assessment", bundle)
             self.assertIn("prepared_context", bundle)
             self.assertIn("text_snippets", bundle["prepared_context"])
+
+    def test_cli_reports_missing_project_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as out_tmp:
+            missing = Path(out_tmp) / "missing"
+            stderr = StringIO()
+
+            with redirect_stderr(stderr), redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(missing),
+                        "--posture",
+                        AdoptionPosture.PERSONAL.value,
+                        "--out",
+                        str(Path(out_tmp) / "out"),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("error:", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
 
 
 if __name__ == "__main__":

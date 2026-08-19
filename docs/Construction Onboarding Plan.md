@@ -26,7 +26,20 @@ Objectives:
 - Represent finding class and authority.
 - Represent evaluation run provenance.
 - Collect basic project evidence without modifying the evaluated project.
+- Extract project identity, lifecycle, governance, and surface hints from manifests and authority records.
+- Prepare a bounded context bundle for a later reasoning backend.
 - Write `evaluation.json`, `report.md`, and `run-record.json`.
+- Write `context-bundle.json`.
+
+Current status:
+
+- Passive evidence inventory implemented.
+- Authority record snapshots implemented.
+- Project context extraction implemented.
+- Surface inference and deferred governance-applicability records implemented.
+- Bounded representative file and text-snippet selection implemented.
+- No-op backend boundary implemented.
+- Model-backed evaluation not yet implemented.
 
 ### Phase 2: Core Evaluation Workflow
 
@@ -66,4 +79,3 @@ Release work must not be confused with evaluation-engine completeness.
 The evaluator must not modify evaluated projects.
 
 Phase 1 does not run target-project commands. Later phases may add explicitly enabled active checks, but passive evaluation remains the default.
-
