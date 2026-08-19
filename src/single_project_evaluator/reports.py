@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from .models import Evaluation, FindingClass
+from .request_package import build_reasoning_request, render_reasoning_request_markdown
 
 
 def write_evaluation_artifacts(evaluation: Evaluation, output_dir: Path) -> dict[str, Path]:
@@ -12,11 +13,17 @@ def write_evaluation_artifacts(evaluation: Evaluation, output_dir: Path) -> dict
     report_md = output_dir / "report.md"
     run_record_json = output_dir / "run-record.json"
     context_bundle_json = output_dir / "context-bundle.json"
+    reasoning_request_json = output_dir / "reasoning-request.json"
+    reasoning_request_md = output_dir / "reasoning-request.md"
 
     data = evaluation.to_dict()
+    context_bundle = _context_bundle(data)
+    reasoning_request = build_reasoning_request(context_bundle)
     evaluation_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
     run_record_json.write_text(json.dumps(data["run"], indent=2), encoding="utf-8")
-    context_bundle_json.write_text(json.dumps(_context_bundle(data), indent=2), encoding="utf-8")
+    context_bundle_json.write_text(json.dumps(context_bundle, indent=2), encoding="utf-8")
+    reasoning_request_json.write_text(json.dumps(reasoning_request, indent=2), encoding="utf-8")
+    reasoning_request_md.write_text(render_reasoning_request_markdown(reasoning_request), encoding="utf-8")
     report_md.write_text(render_markdown_report(evaluation), encoding="utf-8")
 
     return {
@@ -24,6 +31,8 @@ def write_evaluation_artifacts(evaluation: Evaluation, output_dir: Path) -> dict
         "report": report_md,
         "run_record": run_record_json,
         "context_bundle": context_bundle_json,
+        "reasoning_request": reasoning_request_json,
+        "reasoning_request_md": reasoning_request_md,
     }
 
 
@@ -91,6 +100,20 @@ def render_markdown_report(evaluation: Evaluation) -> str:
         lines.append("- Context notes: " + "; ".join(evaluation.context.notes))
     else:
         lines.append("- Context notes: none")
+
+    lines.extend(["", "## Governance Conformance", ""])
+    if evaluation.governance_conformance:
+        for standard, result in sorted(evaluation.governance_conformance.items()):
+            lines.append(f"- {standard}: {result}")
+    else:
+        lines.append("- Governance conformance has not been evaluated.")
+
+    lines.extend(["", "## Evaluation Uncertainties", ""])
+    if evaluation.uncertainties:
+        for uncertainty in evaluation.uncertainties:
+            lines.append(f"- {uncertainty}")
+    else:
+        lines.append("- No backend-supplied uncertainties.")
 
     lines.extend(["", "## Prepared Evaluation Context", ""])
     lines.extend(
@@ -207,7 +230,9 @@ def render_markdown_report(evaluation: Evaluation) -> str:
             f"- Reasoning provider: `{evaluation.run.reasoning_provider}`",
             f"- Model identifier: `{evaluation.run.model_identifier}`",
             "",
-            "This Phase 1 report is a structural evaluation artifact. Deep reasoning-model analysis is not enabled in this run.",
+            "The prepared reasoning package is available in `reasoning-request.json` and `reasoning-request.md`.",
+            "",
+            _backend_note(evaluation.run.reasoning_provider),
             "",
         ]
     )
@@ -238,3 +263,9 @@ def _mapping_summary(values: dict[str, int], limit: int | None = None) -> str:
     if limit is not None and len(items) > limit:
         rendered += f", +{len(items) - limit} more"
     return rendered or "none"
+
+
+def _backend_note(provider: str) -> str:
+    if provider == "none":
+        return "This Phase 1 report is a structural evaluation artifact. Deep reasoning-model analysis is not enabled in this run."
+    return "This report uses a parsed backend response. Deterministic preparation artifacts remain available for review."

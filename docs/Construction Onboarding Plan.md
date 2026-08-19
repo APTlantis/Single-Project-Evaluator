@@ -30,6 +30,7 @@ Objectives:
 - Prepare a bounded context bundle for a later reasoning backend.
 - Write `evaluation.json`, `report.md`, and `run-record.json`.
 - Write `context-bundle.json`.
+- Write `reasoning-request.json` and `reasoning-request.md`.
 
 Current status:
 
@@ -39,6 +40,8 @@ Current status:
 - Surface inference and deferred governance-applicability records implemented.
 - Bounded representative file and text-snippet selection implemented.
 - No-op backend boundary implemented.
+- Provider-neutral reasoning request package implemented.
+- Structured backend response validation implemented.
 - Model-backed evaluation not yet implemented.
 
 ### Phase 2: Core Evaluation Workflow

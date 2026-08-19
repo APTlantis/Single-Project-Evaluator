@@ -18,6 +18,8 @@ from single_project_evaluator.context import extract_project_context
 from single_project_evaluator.analysis import prepare_evaluation_context
 from single_project_evaluator.backend import create_backend
 from single_project_evaluator.models import AdoptionPosture, ApplicabilityState, SurfaceKind
+from single_project_evaluator.request_package import build_reasoning_request
+from single_project_evaluator.response_parser import ResponseValidationError, parse_backend_response
 
 
 class SpineTests(unittest.TestCase):
@@ -238,6 +240,81 @@ class SpineTests(unittest.TestCase):
         self.assertEqual(backend.identity.provider, "none")
         self.assertEqual(backend.identity.model_identifier, "phase-1-spine")
 
+    def test_create_backend_requires_response_file_for_file_backend(self) -> None:
+        with self.assertRaises(ValueError):
+            create_backend("response-file")
+
+    def test_reasoning_request_wraps_context_without_assessment(self) -> None:
+        context_bundle = {
+            "run": {
+                "project_root": "D:/Example",
+                "declared_posture": "shared",
+            },
+            "evidence": {},
+            "context": {},
+            "prepared_context": {},
+        }
+
+        request = build_reasoning_request(context_bundle)
+
+        self.assertEqual(request["purpose"], "single_project_evaluation")
+        self.assertEqual(request["context_bundle"], context_bundle)
+        self.assertNotIn("assessment", request["context_bundle"])
+        self.assertIn("response_contract", request)
+        self.assertIn("instructions", request)
+
+    def test_parse_backend_response_accepts_valid_shape(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": 80,
+                "implementation_quality": 75,
+                "intent_fidelity": "Strong",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "NOT APPLICABLE",
+                "blockers": 0,
+            },
+            "findings": [
+                {
+                    "title": "Example",
+                    "finding_class": "observation",
+                    "area": "Testing",
+                    "authority": "engineering_recommendation",
+                    "applicability": None,
+                    "evidence": ["README.md"],
+                    "impact": "Useful context.",
+                    "consequence": "No action required.",
+                    "recommendation": None,
+                }
+            ],
+            "governance_conformance": {"DRS": "not evaluated"},
+        }
+
+        assessment, findings, governance = parse_backend_response(response)
+
+        self.assertEqual(assessment.functional_completeness, 80)
+        self.assertEqual(findings[0].finding_class.value, "observation")
+        self.assertEqual(governance["DRS"], "not evaluated")
+
+    def test_parse_backend_response_rejects_invalid_scores(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": 101,
+                "implementation_quality": None,
+                "intent_fidelity": "Strong",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "NOT APPLICABLE",
+                "blockers": 0,
+            },
+            "findings": [],
+        }
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
     def test_cli_writes_phase_1_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
             project = Path(project_tmp)
@@ -264,9 +341,12 @@ class SpineTests(unittest.TestCase):
             self.assertTrue((output / "report.md").exists())
             self.assertTrue((output / "run-record.json").exists())
             self.assertTrue((output / "context-bundle.json").exists())
+            self.assertTrue((output / "reasoning-request.json").exists())
+            self.assertTrue((output / "reasoning-request.md").exists())
 
             data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
             bundle = json.loads((output / "context-bundle.json").read_text(encoding="utf-8"))
+            reasoning_request = json.loads((output / "reasoning-request.json").read_text(encoding="utf-8"))
             self.assertEqual(data["run"]["declared_posture"], "shared")
             self.assertEqual(data["run"]["reasoning_provider"], "none")
             self.assertEqual(data["run"]["configuration"]["backend"], "none")
@@ -275,6 +355,69 @@ class SpineTests(unittest.TestCase):
             self.assertNotIn("assessment", bundle)
             self.assertIn("prepared_context", bundle)
             self.assertIn("text_snippets", bundle["prepared_context"])
+            self.assertEqual(reasoning_request["context_bundle"], bundle)
+            self.assertIn("response_contract", reasoning_request)
+
+    def test_cli_can_use_structured_response_file_backend(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "response.json"
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+            response_file.write_text(
+                json.dumps(
+                    {
+                        "assessment": {
+                            "functional_completeness": 90,
+                            "implementation_quality": 85,
+                            "intent_fidelity": "Strong",
+                            "verification_confidence": "Partial",
+                            "posture_fitness": "Shared - Adequate",
+                            "lifecycle_fitness": "Appropriate",
+                            "release_eligibility": "NOT APPLICABLE",
+                            "blockers": 0,
+                        },
+                        "findings": [
+                            {
+                                "title": "Evidence bundle is usable",
+                                "finding_class": "observation",
+                                "area": "Evaluation Spine",
+                                "authority": "engineering_recommendation",
+                                "applicability": None,
+                                "evidence": ["context-bundle.json"],
+                                "impact": "The response-file backend can exercise report generation.",
+                                "consequence": "No live model call is required for parser integration tests.",
+                                "recommendation": None,
+                            }
+                        ],
+                        "governance_conformance": {"PPS": "not evaluated"},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            self.assertEqual(data["run"]["reasoning_provider"], "response-file")
+            self.assertEqual(data["assessment"]["functional_completeness"], 90)
+            self.assertEqual(data["governance_conformance"]["PPS"], "not evaluated")
 
     def test_cli_reports_missing_project_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as out_tmp:

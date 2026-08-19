@@ -59,8 +59,12 @@ def build_parser() -> argparse.ArgumentParser:
     evaluate.add_argument(
         "--backend",
         default="none",
-        choices=["none"],
-        help="Reasoning backend to use. Phase 1 supports only the no-op backend.",
+        choices=["none", "response-file"],
+        help="Reasoning backend to use.",
+    )
+    evaluate.add_argument(
+        "--response-file",
+        help="Path to a structured backend response JSON file for --backend response-file.",
     )
     return parser
 
@@ -73,7 +77,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
     evidence = collect_project_evidence(project_root, max_files=args.max_files)
     context = extract_project_context(project_root, evidence)
     prepared_context = prepare_evaluation_context(evidence, context)
-    backend = create_backend(args.backend)
+    backend = create_backend(args.backend, Path(args.response_file) if args.response_file else None)
     run = EvaluationRun(
         report_id=str(uuid4()),
         timestamp_utc=datetime.now(UTC).replace(microsecond=0).isoformat(),
@@ -86,6 +90,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
             "active_target_commands": False,
             "max_files": args.max_files,
             "backend": args.backend,
+            "response_file": args.response_file,
         },
     )
     backend_result = backend.evaluate(run, evidence, context, prepared_context)
@@ -96,6 +101,8 @@ def evaluate_command(args: argparse.Namespace) -> int:
         prepared_context=prepared_context,
         assessment=backend_result.assessment,
         findings=backend_result.findings,
+        governance_conformance=backend_result.governance_conformance or {},
+        uncertainties=backend_result.uncertainties or [],
     )
 
     artifacts = write_evaluation_artifacts(evaluation, output_dir)
@@ -103,4 +110,5 @@ def evaluate_command(args: argparse.Namespace) -> int:
     print(f"Wrote report: {artifacts['report']}")
     print(f"Wrote run record: {artifacts['run_record']}")
     print(f"Wrote context bundle: {artifacts['context_bundle']}")
+    print(f"Wrote reasoning request: {artifacts['reasoning_request']}")
     return 0
