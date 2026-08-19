@@ -11,16 +11,28 @@ def write_evaluation_artifacts(evaluation: Evaluation, output_dir: Path) -> dict
     evaluation_json = output_dir / "evaluation.json"
     report_md = output_dir / "report.md"
     run_record_json = output_dir / "run-record.json"
+    context_bundle_json = output_dir / "context-bundle.json"
 
     data = evaluation.to_dict()
     evaluation_json.write_text(json.dumps(data, indent=2), encoding="utf-8")
     run_record_json.write_text(json.dumps(data["run"], indent=2), encoding="utf-8")
+    context_bundle_json.write_text(json.dumps(_context_bundle(data), indent=2), encoding="utf-8")
     report_md.write_text(render_markdown_report(evaluation), encoding="utf-8")
 
     return {
         "evaluation": evaluation_json,
         "report": report_md,
         "run_record": run_record_json,
+        "context_bundle": context_bundle_json,
+    }
+
+
+def _context_bundle(evaluation_data: dict) -> dict:
+    return {
+        "run": evaluation_data["run"],
+        "evidence": evaluation_data["evidence"],
+        "context": evaluation_data["context"],
+        "prepared_context": evaluation_data["prepared_context"],
     }
 
 
@@ -79,6 +91,67 @@ def render_markdown_report(evaluation: Evaluation) -> str:
         lines.append("- Context notes: " + "; ".join(evaluation.context.notes))
     else:
         lines.append("- Context notes: none")
+
+    lines.extend(["", "## Prepared Evaluation Context", ""])
+    lines.extend(
+        [
+            f"- Total inventoried size: {evaluation.prepared_context.inventory_summary.total_size_bytes} bytes",
+            "- Role counts: " + _mapping_summary(evaluation.prepared_context.inventory_summary.role_counts),
+            "- Extension counts: "
+            + _mapping_summary(evaluation.prepared_context.inventory_summary.extension_counts, limit=12),
+            "",
+            "### Detected Surfaces",
+            "",
+        ]
+    )
+    for surface in evaluation.prepared_context.surfaces:
+        evidence = ", ".join(f"`{path}`" for path in surface.evidence[:8]) or "no file evidence"
+        lines.append(f"- {surface.kind}: {surface.confidence} confidence; {evidence}")
+
+    lines.extend(["", "### Governance Applicability", ""])
+    if evaluation.prepared_context.governance_applicability:
+        for applicability in evaluation.prepared_context.governance_applicability:
+            lines.append(
+                f"- {applicability.standard}: {applicability.state} "
+                f"from `{applicability.source}`; {applicability.rationale}"
+            )
+    else:
+        lines.append("- No governance applicability records were inferred.")
+
+    if evaluation.prepared_context.notes:
+        lines.append("")
+        for note in evaluation.prepared_context.notes:
+            lines.append(f"- Prepared context note: {note}")
+
+    lines.extend(["", "### Representative Files", ""])
+    if evaluation.prepared_context.representative_files:
+        for file in evaluation.prepared_context.representative_files[:20]:
+            lines.append(f"- `{file.path}` ({file.role}, {file.size_bytes} bytes): {file.reason}")
+    else:
+        lines.append("- No representative files selected.")
+
+    lines.extend(["", "### Text Snippet Samples", ""])
+    if evaluation.prepared_context.text_snippets:
+        for snippet in evaluation.prepared_context.text_snippets[:6]:
+            truncated = "yes" if snippet.truncated else "no"
+            lines.extend(
+                [
+                    f"#### `{snippet.path}`",
+                    "",
+                    f"- Role: {snippet.role}",
+                    f"- SHA-256: `{snippet.sha256}`",
+                    f"- Truncated: {truncated}",
+                    "",
+                    "```text",
+                    snippet.excerpt or "[empty file]",
+                    "```",
+                    "",
+                ]
+            )
+        if len(evaluation.prepared_context.text_snippets) > 6:
+            lines.append(f"- {len(evaluation.prepared_context.text_snippets) - 6} additional snippets are present in `context-bundle.json`.")
+    else:
+        lines.append("- No text snippets collected.")
 
     lines.extend(["", "## Authority Record Snapshots", ""])
     if evaluation.evidence.authority_records:
@@ -156,3 +229,12 @@ def _context_value(value) -> str:
     if value.source:
         return f"{rendered} (`{value.source}`)"
     return rendered
+
+
+def _mapping_summary(values: dict[str, int], limit: int | None = None) -> str:
+    items = list(values.items())
+    shown = items[:limit] if limit is not None else items
+    rendered = ", ".join(f"{key}={value}" for key, value in shown)
+    if limit is not None and len(items) > limit:
+        rendered += f", +{len(items) - limit} more"
+    return rendered or "none"

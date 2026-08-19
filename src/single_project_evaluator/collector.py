@@ -99,7 +99,7 @@ def _classify_file(name: str) -> str:
         return "documentation"
     if lower.endswith((".toml", ".json", ".yaml", ".yml")):
         return "configuration"
-    if lower.endswith((".py", ".rs", ".ts", ".tsx", ".js", ".jsx", ".cs")):
+    if lower.endswith((".py", ".rs", ".ts", ".tsx", ".js", ".jsx", ".cs", ".vb", ".xaml")):
         return "source"
     return "artifact"
 

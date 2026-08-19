@@ -14,7 +14,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 from single_project_evaluator.cli import main
 from single_project_evaluator.collector import _git_commit, collect_project_evidence
 from single_project_evaluator.context import extract_project_context
-from single_project_evaluator.models import AdoptionPosture
+from single_project_evaluator.analysis import prepare_evaluation_context
+from single_project_evaluator.backend import create_backend
+from single_project_evaluator.models import AdoptionPosture, ApplicabilityState, SurfaceKind
 
 
 class SpineTests(unittest.TestCase):
@@ -177,6 +179,64 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(context.primary_standard.value, "DRS")
             self.assertEqual(context.applicable_governance.value, ["DRS", "WGS", "PPS", "AAMHS"])
 
+    def test_prepare_evaluation_context_summarizes_surfaces_and_governance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "File Cabinet.manifest.toml").write_text(
+                "\n".join(
+                    [
+                        "[project]",
+                        'title = "File Cabinet"',
+                        'type = "tool"',
+                        'stage = "production"',
+                        "",
+                        "[governance]",
+                        'primary_standard = "DRS"',
+                        'additional_standards = ["WGS", "PPS"]',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            (root / "FileCabinet.vbproj").write_text("<Project />\n", encoding="utf-8")
+            (root / "MainWindow.xaml").write_text("<Window />\n", encoding="utf-8")
+            (root / "Program.vb").write_text("Module Program\nEnd Module\n", encoding="utf-8")
+
+            evidence = collect_project_evidence(root)
+            context = extract_project_context(root, evidence)
+            prepared = prepare_evaluation_context(evidence, context)
+
+            self.assertEqual(prepared.inventory_summary.role_counts["source"], 2)
+            self.assertGreater(prepared.inventory_summary.total_size_bytes, 0)
+            self.assertEqual(prepared.surfaces[0].kind, SurfaceKind.DESKTOP_APP)
+            self.assertEqual(prepared.surfaces[0].confidence, "strong")
+            self.assertEqual(prepared.representative_files[0].path, "File Cabinet.manifest.toml")
+            self.assertEqual(prepared.representative_files[0].reason, "authority record: manifest")
+            snippets_by_path = {snippet.path: snippet for snippet in prepared.text_snippets}
+            self.assertIn("Program.vb", snippets_by_path)
+            self.assertTrue(snippets_by_path["Program.vb"].sha256)
+            records = {record.standard: record for record in prepared.governance_applicability}
+            self.assertEqual(records["DRS"].state, ApplicabilityState.DEFERRED)
+            self.assertIn("WGS", records)
+
+    def test_prepare_evaluation_context_bounds_text_snippets(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "README.md").write_text("A" * 2000, encoding="utf-8")
+
+            evidence = collect_project_evidence(root)
+            context = extract_project_context(root, evidence)
+            prepared = prepare_evaluation_context(evidence, context)
+
+            self.assertEqual(len(prepared.text_snippets), 1)
+            self.assertTrue(prepared.text_snippets[0].truncated)
+            self.assertLessEqual(prepared.text_snippets[0].chars, 1220)
+
+    def test_create_backend_returns_noop_backend(self) -> None:
+        backend = create_backend("none")
+
+        self.assertEqual(backend.identity.provider, "none")
+        self.assertEqual(backend.identity.model_identifier, "phase-1-spine")
+
     def test_cli_writes_phase_1_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
             project = Path(project_tmp)
@@ -193,6 +253,8 @@ class SpineTests(unittest.TestCase):
                         AdoptionPosture.SHARED.value,
                         "--out",
                         str(output),
+                        "--backend",
+                        "none",
                     ]
                 )
 
@@ -200,11 +262,18 @@ class SpineTests(unittest.TestCase):
             self.assertTrue((output / "evaluation.json").exists())
             self.assertTrue((output / "report.md").exists())
             self.assertTrue((output / "run-record.json").exists())
+            self.assertTrue((output / "context-bundle.json").exists())
 
             data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            bundle = json.loads((output / "context-bundle.json").read_text(encoding="utf-8"))
             self.assertEqual(data["run"]["declared_posture"], "shared")
             self.assertEqual(data["run"]["reasoning_provider"], "none")
+            self.assertEqual(data["run"]["configuration"]["backend"], "none")
             self.assertEqual(data["context"]["project_name"]["value"], project.name)
+            self.assertIn("prepared_context", data)
+            self.assertNotIn("assessment", bundle)
+            self.assertIn("prepared_context", bundle)
+            self.assertIn("text_snippets", bundle["prepared_context"])
 
 
 if __name__ == "__main__":

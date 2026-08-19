@@ -32,6 +32,16 @@ class FindingAuthority(StrEnum):
     ADOPTION_RECOMMENDATION = "adoption_recommendation"
 
 
+class SurfaceKind(StrEnum):
+    COMMAND_TOOL = "command_tool"
+    DESKTOP_APP = "desktop_app"
+    WEBSITE = "website"
+    LIBRARY = "library"
+    SERVICE = "service"
+    DATASET = "dataset"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True)
 class FileEvidence:
     path: str
@@ -81,6 +91,56 @@ class ProjectContext:
 
 
 @dataclass(frozen=True)
+class InventorySummary:
+    role_counts: dict[str, int] = field(default_factory=dict)
+    extension_counts: dict[str, int] = field(default_factory=dict)
+    total_size_bytes: int = 0
+
+
+@dataclass(frozen=True)
+class SurfaceEvidence:
+    kind: SurfaceKind
+    confidence: str
+    evidence: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class GovernanceApplicability:
+    standard: str
+    state: ApplicabilityState
+    source: str
+    rationale: str
+
+
+@dataclass(frozen=True)
+class RepresentativeFile:
+    path: str
+    role: str
+    size_bytes: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class TextSnippet:
+    path: str
+    role: str
+    sha256: str
+    chars: int
+    truncated: bool
+    excerpt: str
+
+
+@dataclass(frozen=True)
+class PreparedContext:
+    inventory_summary: InventorySummary = field(default_factory=InventorySummary)
+    surfaces: list[SurfaceEvidence] = field(default_factory=list)
+    governance_applicability: list[GovernanceApplicability] = field(default_factory=list)
+    representative_files: list[RepresentativeFile] = field(default_factory=list)
+    text_snippets: list[TextSnippet] = field(default_factory=list)
+    notes: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
 class AssessmentProfile:
     functional_completeness: int | None = None
     implementation_quality: int | None = None
@@ -122,6 +182,7 @@ class Evaluation:
     run: EvaluationRun
     evidence: ProjectEvidence
     context: ProjectContext
+    prepared_context: PreparedContext
     assessment: AssessmentProfile
     findings: list[Finding]
     governance_conformance: dict[str, str] = field(default_factory=dict)

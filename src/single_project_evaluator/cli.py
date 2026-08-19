@@ -6,16 +6,14 @@ from pathlib import Path
 from uuid import uuid4
 
 from . import __version__
+from .analysis import prepare_evaluation_context
+from .backend import create_backend
 from .collector import collect_project_evidence
 from .context import extract_project_context
 from .models import (
     AdoptionPosture,
-    AssessmentProfile,
     Evaluation,
     EvaluationRun,
-    Finding,
-    FindingAuthority,
-    FindingClass,
 )
 from .reports import write_evaluation_artifacts
 
@@ -53,6 +51,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         help="Maximum project files to inventory during Phase 1 collection.",
     )
+    evaluate.add_argument(
+        "--backend",
+        default="none",
+        choices=["none"],
+        help="Reasoning backend to use. Phase 1 supports only the no-op backend.",
+    )
     return parser
 
 
@@ -63,43 +67,35 @@ def evaluate_command(args: argparse.Namespace) -> int:
 
     evidence = collect_project_evidence(project_root, max_files=args.max_files)
     context = extract_project_context(project_root, evidence)
+    prepared_context = prepare_evaluation_context(evidence, context)
+    backend = create_backend(args.backend)
     run = EvaluationRun(
         report_id=str(uuid4()),
         timestamp_utc=datetime.now(UTC).replace(microsecond=0).isoformat(),
         project_root=evidence.root,
         declared_posture=posture,
         evaluator_version=__version__,
-        reasoning_provider="none",
-        model_identifier="phase-1-spine",
+        reasoning_provider=backend.identity.provider,
+        model_identifier=backend.identity.model_identifier,
         configuration={
             "active_target_commands": False,
             "max_files": args.max_files,
+            "backend": args.backend,
         },
     )
+    backend_result = backend.evaluate(run, evidence, context, prepared_context)
     evaluation = Evaluation(
         run=run,
         evidence=evidence,
         context=context,
-        assessment=AssessmentProfile(
-            posture_fitness=f"{posture.value.title()} - Not assessed",
-            release_eligibility="NOT APPLICABLE",
-        ),
-        findings=[
-            Finding(
-                title="Deep reasoning evaluation is not yet implemented",
-                finding_class=FindingClass.OBSERVATION,
-                area="Evaluation Spine",
-                authority=FindingAuthority.ENGINEERING_RECOMMENDATION,
-                evidence=["Phase 1 collector and report writer completed without invoking a reasoning backend."],
-                impact="The generated artifacts prove the evaluation object shape but do not yet judge the target project.",
-                consequence="No project-quality conclusions should be drawn from this Phase 1 run.",
-                recommendation="Use this output to validate artifact shape before implementing governance and reasoning stages.",
-            )
-        ],
+        prepared_context=prepared_context,
+        assessment=backend_result.assessment,
+        findings=backend_result.findings,
     )
 
     artifacts = write_evaluation_artifacts(evaluation, output_dir)
     print(f"Wrote evaluation: {artifacts['evaluation']}")
     print(f"Wrote report: {artifacts['report']}")
     print(f"Wrote run record: {artifacts['run_record']}")
+    print(f"Wrote context bundle: {artifacts['context_bundle']}")
     return 0
