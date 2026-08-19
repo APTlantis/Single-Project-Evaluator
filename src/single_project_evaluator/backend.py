@@ -24,6 +24,7 @@ class BackendResult:
     findings: list[Finding]
     governance_conformance: dict[str, str] | None = None
     uncertainties: list[str] | None = None
+    narrative: str | None = None
 
 
 @dataclass(frozen=True)
@@ -103,10 +104,11 @@ def create_backend(name: str, response_file: Path | None = None) -> NoopReasonin
 
 
 def backend_result_from_response(data: dict[str, Any]) -> BackendResult:
-    assessment, findings, governance_conformance, uncertainties = parse_backend_response(data)
+    assessment, findings, governance_conformance, uncertainties, narrative = parse_backend_response(data)
     return BackendResult(
         assessment=assessment,
         findings=findings,
         governance_conformance=governance_conformance,
         uncertainties=uncertainties,
+        narrative=narrative,
     )

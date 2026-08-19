@@ -211,6 +211,7 @@ class Evaluation:
     findings: list[Finding]
     governance_conformance: dict[str, str] = field(default_factory=dict)
     uncertainties: list[str] = field(default_factory=list)
+    narrative: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

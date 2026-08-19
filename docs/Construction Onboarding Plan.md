@@ -45,6 +45,7 @@ Current status:
 - No-op backend boundary implemented.
 - Provider-neutral reasoning request package implemented.
 - Structured backend response validation implemented.
+- Optional backend narrative preservation and report rendering implemented for response-file runs.
 - Model-backed evaluation not yet implemented.
 
 ### Phase 2: Core Evaluation Workflow
@@ -73,8 +74,8 @@ Objectives:
 Objectives:
 
 - Stabilize command contract.
-- Add machine-readable output guarantees. Started for `evaluate --json` and `list-runs --json` success output.
-- Define exit codes.
+- Add machine-readable output guarantees. Started for `evaluate --json`, `validate-response --json`, and `list-runs --json` success/error output.
+- Define exit codes. Started with success `0`, clean command error `1`, and usage/help fallback `2`.
 - Document examples.
 - Preserve release evidence.
 

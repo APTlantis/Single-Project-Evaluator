@@ -43,6 +43,7 @@ REQUIRED_RESPONSE_CONTRACT: dict[str, Any] = {
         "STANDARD": "percentage/count string when conformance has actually been evaluated"
     },
     "uncertainties": ["important limits in supplied evidence or reasoning"],
+    "narrative": "optional markdown narrative explaining the assessment, evidence, limits, and priority of findings",
 }
 
 
@@ -56,6 +57,39 @@ def build_reasoning_request(context_bundle: dict[str, Any]) -> dict[str, Any]:
         "instructions": EVALUATION_INSTRUCTIONS,
         "context_bundle": context_bundle,
         "response_contract": REQUIRED_RESPONSE_CONTRACT,
+    }
+
+
+def build_response_template() -> dict[str, Any]:
+    return {
+        "assessment": {
+            "functional_completeness": None,
+            "implementation_quality": None,
+            "intent_fidelity": "Ambiguous",
+            "verification_confidence": "Unverified",
+            "posture_fitness": "Shared - Adequate",
+            "lifecycle_fitness": "Ambiguous",
+            "release_eligibility": "NOT APPLICABLE",
+            "blockers": 0,
+        },
+        "findings": [
+            {
+                "title": "Replace with evidence-backed finding title",
+                "finding_class": "observation",
+                "area": "Evaluation Area",
+                "authority": "engineering_recommendation",
+                "applicability": None,
+                "evidence": ["path or evidence reference"],
+                "impact": "Why this matters.",
+                "consequence": "What follows from the evidence.",
+                "recommendation": None,
+            }
+        ],
+        "governance_conformance": {},
+        "uncertainties": [
+            "Describe any important evidence limits or uncertainty."
+        ],
+        "narrative": "Optional markdown narrative explaining the assessment, evidence, limits, and priority of findings.",
     }
 
 

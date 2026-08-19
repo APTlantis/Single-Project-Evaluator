@@ -154,6 +154,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
         findings=backend_result.findings,
         governance_conformance=backend_result.governance_conformance or {},
         uncertainties=backend_result.uncertainties or [],
+        narrative=backend_result.narrative,
     )
 
     artifacts = write_evaluation_artifacts(evaluation, output_dir)
@@ -175,6 +176,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
     print(f"Wrote run record: {artifacts['latest_run_record']}")
     print(f"Wrote context bundle: {artifacts['latest_context_bundle']}")
     print(f"Wrote reasoning request: {artifacts['latest_reasoning_request']}")
+    print(f"Wrote response template: {artifacts['latest_response_template']}")
     print(f"Wrote run index: {artifacts['run_index']}")
     return EXIT_OK
 
@@ -182,7 +184,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
 def validate_response_command(args: argparse.Namespace) -> int:
     response_file = Path(args.response_file)
     data = json.loads(response_file.read_text(encoding="utf-8"))
-    assessment, findings, governance_conformance, uncertainties = parse_backend_response(data)
+    assessment, findings, governance_conformance, uncertainties, narrative = parse_backend_response(data)
     if args.json:
         print(
             json.dumps(
@@ -194,6 +196,7 @@ def validate_response_command(args: argparse.Namespace) -> int:
                     "release_eligibility": assessment.release_eligibility,
                     "governance_conformance_entries": len(governance_conformance),
                     "uncertainties": len(uncertainties),
+                    "has_narrative": narrative is not None,
                 },
                 indent=2,
             )
@@ -205,6 +208,7 @@ def validate_response_command(args: argparse.Namespace) -> int:
     print(f"Release eligibility: {assessment.release_eligibility}")
     print(f"Governance conformance entries: {len(governance_conformance)}")
     print(f"Uncertainties: {len(uncertainties)}")
+    print(f"Narrative: {'present' if narrative is not None else 'absent'}")
     return EXIT_OK
 
 

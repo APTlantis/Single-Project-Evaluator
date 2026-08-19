@@ -5,7 +5,7 @@ import shutil
 from pathlib import Path
 
 from .models import Evaluation, FindingClass
-from .request_package import build_reasoning_request, render_reasoning_request_markdown
+from .request_package import build_reasoning_request, build_response_template, render_reasoning_request_markdown
 
 
 ARTIFACT_FILENAMES = {
@@ -15,6 +15,7 @@ ARTIFACT_FILENAMES = {
     "context_bundle": "context-bundle.json",
     "reasoning_request": "reasoning-request.json",
     "reasoning_request_md": "reasoning-request.md",
+    "response_template": "response-template.json",
 }
 
 
@@ -32,6 +33,7 @@ def write_evaluation_artifacts(evaluation: Evaluation, output_dir: Path) -> dict
     paths["context_bundle"].write_text(json.dumps(context_bundle, indent=2), encoding="utf-8")
     paths["reasoning_request"].write_text(json.dumps(reasoning_request, indent=2), encoding="utf-8")
     paths["reasoning_request_md"].write_text(render_reasoning_request_markdown(reasoning_request), encoding="utf-8")
+    paths["response_template"].write_text(json.dumps(build_response_template(), indent=2), encoding="utf-8")
     paths["report"].write_text(render_markdown_report(evaluation), encoding="utf-8")
 
     latest_paths = _write_latest_aliases(paths, output_dir)
@@ -200,6 +202,12 @@ def render_markdown_report(evaluation: Evaluation) -> str:
     else:
         lines.append("- No backend-supplied uncertainties.")
 
+    lines.extend(["", "## Backend Narrative", ""])
+    if evaluation.narrative:
+        lines.append(evaluation.narrative)
+    else:
+        lines.append("- No backend-supplied narrative.")
+
     lines.extend(["", "## Prepared Evaluation Context", ""])
     lines.extend(
         [
@@ -357,6 +365,7 @@ def render_markdown_report(evaluation: Evaluation) -> str:
             f"- Model identifier: `{evaluation.run.model_identifier}`",
             "",
             "The prepared reasoning package is available in `reasoning-request.json` and `reasoning-request.md`.",
+            "A fillable structured backend response skeleton is available in `response-template.json`.",
             "",
             _backend_note(evaluation.run.reasoning_provider),
             "",

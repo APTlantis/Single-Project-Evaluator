@@ -42,12 +42,16 @@ For machine-readable success output, add `--json`:
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend none --json
 ```
 
-Model-backed evaluation is not implemented yet. The current backend boundary includes a no-op backend, a response-file backend, and a response parser/validator for the future structured model response.
+Model-backed evaluation is not implemented yet. The current backend boundary includes a no-op backend, a response-file backend, and a response parser/validator for the future structured model response. Structured backend responses may include an optional markdown `narrative` field, which is preserved in `evaluation.json` and rendered in `report.md`.
 
 Validate a saved structured backend response before using it:
 
 ```powershell
 python -m single_project_evaluator validate-response --response-file reports\response.json
+```
+
+```powershell
+python -m single_project_evaluator validate-response --response-file reports\response.json --json
 ```
 
 Use a validated response file to produce populated assessment/report fields:
@@ -64,6 +68,22 @@ python -m single_project_evaluator list-runs --out reports
 
 ```powershell
 python -m single_project_evaluator list-runs --out reports --json
+```
+
+## Command Contract
+
+- Exit `0`: command completed successfully.
+- Exit `1`: command input or runtime error reported cleanly without a traceback.
+- Exit `2`: command-line usage error or help fallback.
+
+When `--json` is present on `evaluate`, `validate-response`, or `list-runs`, success output is written as JSON to stdout. Clean command errors are written as JSON to stderr:
+
+```json
+{
+  "status": "error",
+  "error": "human-readable message",
+  "error_type": "ExceptionClassName"
+}
 ```
 
 ## Adoption Postures

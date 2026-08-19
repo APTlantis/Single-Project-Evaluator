@@ -23,7 +23,7 @@ POSTURE_FITNESS_PREFIXES = ("Personal - ", "Shared - ", "Adoptable - ")
 POSTURE_FITNESS_VALUES = {"Strong", "Adequate", "Marginal", "Weak", "Not assessed"}
 
 
-def parse_backend_response(data: dict[str, Any]) -> tuple[AssessmentProfile, list[Finding], dict[str, str], list[str]]:
+def parse_backend_response(data: dict[str, Any]) -> tuple[AssessmentProfile, list[Finding], dict[str, str], list[str], str | None]:
     if not isinstance(data, dict):
         raise ResponseValidationError("Backend response must be a JSON object.")
 
@@ -35,8 +35,9 @@ def parse_backend_response(data: dict[str, Any]) -> tuple[AssessmentProfile, lis
     uncertainties = data.get("uncertainties", [])
     if not isinstance(uncertainties, list) or not all(isinstance(item, str) for item in uncertainties):
         raise ResponseValidationError("uncertainties must be a list of strings when present.")
+    narrative = _optional_string(data.get("narrative"), "narrative")
 
-    return assessment, findings, {str(key): str(value) for key, value in governance.items()}, uncertainties
+    return assessment, findings, {str(key): str(value) for key, value in governance.items()}, uncertainties, narrative
 
 
 def _parse_assessment(data: dict[str, Any]) -> AssessmentProfile:

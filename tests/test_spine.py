@@ -18,7 +18,7 @@ from single_project_evaluator.context import extract_project_context
 from single_project_evaluator.analysis import prepare_evaluation_context
 from single_project_evaluator.backend import create_backend
 from single_project_evaluator.models import AdoptionPosture, ApplicabilityState, SurfaceKind
-from single_project_evaluator.request_package import build_reasoning_request
+from single_project_evaluator.request_package import build_reasoning_request, build_response_template
 from single_project_evaluator.response_parser import ResponseValidationError, parse_backend_response
 
 
@@ -338,6 +338,17 @@ class SpineTests(unittest.TestCase):
         self.assertIn("response_contract", request)
         self.assertIn("instructions", request)
 
+    def test_response_template_matches_parser_contract(self) -> None:
+        template = build_response_template()
+
+        assessment, findings, governance, uncertainties, narrative = parse_backend_response(template)
+
+        self.assertIsNone(assessment.functional_completeness)
+        self.assertEqual(findings[0].finding_class.value, "observation")
+        self.assertEqual(governance, {})
+        self.assertEqual(len(uncertainties), 1)
+        self.assertIsNotNone(narrative)
+
     def test_parse_backend_response_accepts_valid_shape(self) -> None:
         response = {
             "assessment": {
@@ -367,12 +378,13 @@ class SpineTests(unittest.TestCase):
             "uncertainties": ["No tests were supplied."],
         }
 
-        assessment, findings, governance, uncertainties = parse_backend_response(response)
+        assessment, findings, governance, uncertainties, narrative = parse_backend_response(response)
 
         self.assertEqual(assessment.functional_completeness, 80)
         self.assertEqual(findings[0].finding_class.value, "observation")
         self.assertEqual(governance["DRS"], "not evaluated")
         self.assertEqual(uncertainties, ["No tests were supplied."])
+        self.assertIsNone(narrative)
 
     def test_parse_backend_response_rejects_invalid_scores(self) -> None:
         response = {
@@ -423,6 +435,25 @@ class SpineTests(unittest.TestCase):
                 "blockers": 0,
             },
             "findings": [],
+        }
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_rejects_invalid_narrative(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": None,
+                "implementation_quality": None,
+                "intent_fidelity": "Strong",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "NOT APPLICABLE",
+                "blockers": 0,
+            },
+            "findings": [],
+            "narrative": ["not", "a", "string"],
         }
 
         with self.assertRaises(ResponseValidationError):
@@ -494,6 +525,7 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(Path(payload["response_file"]), response_file)
             self.assertEqual(payload["findings"], 0)
             self.assertEqual(payload["release_eligibility"], "NOT APPLICABLE")
+            self.assertFalse(payload["has_narrative"])
 
     def test_cli_validate_response_rejects_invalid_file_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -588,11 +620,13 @@ class SpineTests(unittest.TestCase):
             self.assertTrue((output / "context-bundle.json").exists())
             self.assertTrue((output / "reasoning-request.json").exists())
             self.assertTrue((output / "reasoning-request.md").exists())
+            self.assertTrue((output / "response-template.json").exists())
             run_dirs = list((output / "runs").iterdir())
             materialized_run_dirs = [path for path in run_dirs if path.is_dir()]
             self.assertEqual(len(materialized_run_dirs), 1)
             self.assertTrue((materialized_run_dirs[0] / "evaluation.json").exists())
             self.assertTrue((materialized_run_dirs[0] / "report.md").exists())
+            self.assertTrue((materialized_run_dirs[0] / "response-template.json").exists())
             self.assertTrue((output / "runs" / "index.json").exists())
             self.assertTrue((output / "runs" / "index.md").exists())
 
@@ -601,6 +635,7 @@ class SpineTests(unittest.TestCase):
             run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
             bundle = json.loads((output / "context-bundle.json").read_text(encoding="utf-8"))
             reasoning_request = json.loads((output / "reasoning-request.json").read_text(encoding="utf-8"))
+            response_template = json.loads((output / "response-template.json").read_text(encoding="utf-8"))
             self.assertEqual(data, run_data)
             self.assertEqual(len(run_index["runs"]), 1)
             self.assertEqual(run_index["runs"][0]["report_id"], data["run"]["report_id"])
@@ -614,6 +649,8 @@ class SpineTests(unittest.TestCase):
             self.assertIn("text_snippets", bundle["prepared_context"])
             self.assertEqual(reasoning_request["context_bundle"], bundle)
             self.assertIn("response_contract", reasoning_request)
+            self.assertEqual(response_template, build_response_template())
+            parse_backend_response(response_template)
 
     def test_cli_evaluate_can_print_json_success_output(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
@@ -643,6 +680,7 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(payload["status"], "ok")
             self.assertTrue(Path(payload["run_dir"]).exists())
             self.assertEqual(Path(payload["artifacts"]["latest_evaluation"]), output / "evaluation.json")
+            self.assertEqual(Path(payload["artifacts"]["latest_response_template"]), output / "response-template.json")
             self.assertNotIn("Wrote run directory", stdout.getvalue())
 
     def test_cli_lists_preserved_runs(self) -> None:
@@ -775,6 +813,7 @@ class SpineTests(unittest.TestCase):
                         ],
                         "governance_conformance": {"PPS": "not evaluated"},
                         "uncertainties": ["The response was supplied from a test fixture."],
+                        "narrative": "## Evaluation Narrative\n\nThe supplied response describes a usable evidence bundle.",
                     }
                 ),
                 encoding="utf-8",
@@ -804,8 +843,14 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(data["assessment"]["functional_completeness"], 90)
             self.assertEqual(data["governance_conformance"]["PPS"], "not evaluated")
             self.assertEqual(data["uncertainties"], ["The response was supplied from a test fixture."])
+            self.assertEqual(
+                data["narrative"],
+                "## Evaluation Narrative\n\nThe supplied response describes a usable evidence bundle.",
+            )
             self.assertIn("PPS: not evaluated", report)
             self.assertIn("The response was supplied from a test fixture.", report)
+            self.assertIn("## Backend Narrative", report)
+            self.assertIn("The supplied response describes a usable evidence bundle.", report)
             self.assertIn("This report uses a parsed backend response.", report)
 
     def test_cli_reports_missing_project_without_traceback(self) -> None:
