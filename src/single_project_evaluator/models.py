@@ -85,6 +85,7 @@ class ProjectContext:
     primary_standard: ContextValue = field(default_factory=lambda: ContextValue(None))
     expected_delivery_standard: ContextValue = field(default_factory=lambda: ContextValue(None))
     applicable_governance: ContextValue = field(default_factory=lambda: ContextValue([]))
+    governance_standard_paths: ContextValue = field(default_factory=lambda: ContextValue({}))
     pps_path: ContextValue = field(default_factory=lambda: ContextValue(None))
     readme_path: ContextValue = field(default_factory=lambda: ContextValue(None))
     notes: list[str] = field(default_factory=list)
@@ -131,10 +132,33 @@ class TextSnippet:
 
 
 @dataclass(frozen=True)
+class GovernanceMaterial:
+    standard: str
+    path: str
+    source: str
+    size_bytes: int
+    sha256: str
+    chars: int
+    truncated: bool
+    excerpt: str
+    read_error: str | None = None
+
+
+@dataclass(frozen=True)
+class DeterministicEvidence:
+    category: str
+    path: str
+    size_bytes: int
+    summary: str
+
+
+@dataclass(frozen=True)
 class PreparedContext:
     inventory_summary: InventorySummary = field(default_factory=InventorySummary)
     surfaces: list[SurfaceEvidence] = field(default_factory=list)
     governance_applicability: list[GovernanceApplicability] = field(default_factory=list)
+    governance_materials: list[GovernanceMaterial] = field(default_factory=list)
+    deterministic_evidence: list[DeterministicEvidence] = field(default_factory=list)
     representative_files: list[RepresentativeFile] = field(default_factory=list)
     text_snippets: list[TextSnippet] = field(default_factory=list)
     notes: list[str] = field(default_factory=list)

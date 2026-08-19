@@ -37,6 +37,12 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             print(f"error: {exc}", file=sys.stderr)
             return 1
+    if args.command == "list-runs":
+        try:
+            return list_runs_command(args)
+        except (OSError, ValueError, json.JSONDecodeError) as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            return 1
 
     parser.print_help()
     return 2
@@ -84,6 +90,12 @@ def build_parser() -> argparse.ArgumentParser:
         required=True,
         help="Path to the backend response JSON file to validate.",
     )
+
+    list_runs = subparsers.add_parser(
+        "list-runs",
+        help="List preserved evaluation runs from an existing run index.",
+    )
+    list_runs.add_argument("--out", default="reports", help="Directory containing generated reports.")
     return parser
 
 
@@ -145,3 +157,44 @@ def validate_response_command(args: argparse.Namespace) -> int:
     print(f"Governance conformance entries: {len(governance_conformance)}")
     print(f"Uncertainties: {len(uncertainties)}")
     return 0
+
+
+def list_runs_command(args: argparse.Namespace) -> int:
+    index_path = Path(args.out) / "runs" / "index.json"
+    if not index_path.exists():
+        raise FileNotFoundError(f"run index not found: {index_path}")
+
+    data = json.loads(index_path.read_text(encoding="utf-8"))
+    runs = data.get("runs")
+    if not isinstance(runs, list):
+        raise ValueError(f"run index has no runs list: {index_path}")
+    if not runs:
+        print("No evaluation runs found.")
+        return 0
+
+    print("Timestamp | Project | Posture | Backend | Release | Blockers | Findings | Run")
+    print("--- | --- | --- | --- | --- | ---: | ---: | ---")
+    for entry in runs:
+        if not isinstance(entry, dict):
+            raise ValueError(f"run index contains a non-object entry: {index_path}")
+        print(
+            " | ".join(
+                [
+                    _display_value(entry.get("timestamp_utc")),
+                    _display_value(entry.get("project_root")),
+                    _display_value(entry.get("declared_posture")),
+                    _display_value(entry.get("reasoning_provider")),
+                    _display_value(entry.get("release_eligibility")),
+                    _display_value(entry.get("blockers")),
+                    _display_value(entry.get("finding_count")),
+                    _display_value(entry.get("run_dir")),
+                ]
+            )
+        )
+    return 0
+
+
+def _display_value(value: object) -> str:
+    if value is None:
+        return ""
+    return str(value).replace("\r", " ").replace("\n", " ")

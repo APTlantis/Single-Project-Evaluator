@@ -63,6 +63,12 @@ def _context_from_manifest(root: Path, manifest_path: Path, notes: list[str]) ->
     intent = _table(data, "intent")
     primary_standard = _string(governance.get("primary_standard"))
     additional_standards = _string_list(governance.get("additional_standards"))
+    governance_standard_paths = _governance_standard_paths(
+        primary_standard,
+        _string(governance.get("primary_standard_path")),
+        additional_standards,
+        _string_list(governance.get("additional_standard_paths")),
+    )
 
     return ProjectContext(
         project_name=_context_value(
@@ -82,6 +88,7 @@ def _context_from_manifest(root: Path, manifest_path: Path, notes: list[str]) ->
             ),
             source,
         ),
+        governance_standard_paths=_context_value(governance_standard_paths, source),
         pps_path=_context_value(_string(intent.get("pps")), source),
         notes=notes,
     )
@@ -129,6 +136,10 @@ def _merge_context(base: ProjectContext, incoming: ProjectContext) -> ProjectCon
             incoming.expected_delivery_standard,
         ),
         "applicable_governance": _prefer(base.applicable_governance, incoming.applicable_governance),
+        "governance_standard_paths": _prefer(
+            base.governance_standard_paths,
+            incoming.governance_standard_paths,
+        ),
         "pps_path": _prefer(base.pps_path, incoming.pps_path),
         "readme_path": _prefer(base.readme_path, incoming.readme_path),
     }
@@ -144,6 +155,7 @@ def _replace(context: ProjectContext, **changes: ContextValue) -> ProjectContext
         "primary_standard": context.primary_standard,
         "expected_delivery_standard": context.expected_delivery_standard,
         "applicable_governance": context.applicable_governance,
+        "governance_standard_paths": context.governance_standard_paths,
         "pps_path": context.pps_path,
         "readme_path": context.readme_path,
     }
@@ -152,13 +164,13 @@ def _replace(context: ProjectContext, **changes: ContextValue) -> ProjectContext
 
 
 def _prefer(current: ContextValue, incoming: ContextValue) -> ContextValue:
-    if current.value not in (None, [], ""):
+    if current.value not in (None, [], {}, ""):
         return current
     return incoming
 
 
 def _context_value(value: Any, source: str) -> ContextValue:
-    if value in (None, [], ""):
+    if value in (None, [], {}, ""):
         return ContextValue(value)
     return ContextValue(value, source)
 
@@ -202,6 +214,21 @@ def _manifest_project_classes(project: dict[str, Any], entity: dict[str, Any]) -
         if isinstance(candidate, str) and candidate.strip() and candidate not in values:
             values.append(candidate)
     return values
+
+
+def _governance_standard_paths(
+    primary_standard: str | None,
+    primary_standard_path: str | None,
+    additional_standards: list[str],
+    additional_standard_paths: list[str],
+) -> dict[str, str]:
+    paths = {}
+    if primary_standard and primary_standard_path:
+        paths[primary_standard] = primary_standard_path
+    for index, standard in enumerate(additional_standards):
+        if index < len(additional_standard_paths):
+            paths[standard] = additional_standard_paths[index]
+    return paths
 
 
 def _split_classes(value: str) -> list[str]:

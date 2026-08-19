@@ -6,6 +6,8 @@ from pathlib import PurePosixPath
 
 from .models import (
     ApplicabilityState,
+    DeterministicEvidence,
+    GovernanceMaterial,
     GovernanceApplicability,
     InventorySummary,
     PreparedContext,
@@ -60,12 +62,23 @@ TEXT_SNIPPET_EXTENSIONS = {
 }
 TEXT_SNIPPET_CHARS = 1200
 TEXT_SNIPPET_LIMIT = 18
+GOVERNANCE_MATERIAL_CHARS = 2000
+GOVERNANCE_MATERIAL_LIMIT = 8
+DETERMINISTIC_EVIDENCE_LIMIT = 40
+DETERMINISTIC_EVIDENCE_CATEGORY_LIMITS = {
+    "verification_record": 12,
+    "release_artifact": 10,
+    "test_source": 10,
+    "build_configuration": 8,
+}
 
 
 def prepare_evaluation_context(evidence: ProjectEvidence, context: ProjectContext) -> PreparedContext:
     inventory_summary = summarize_inventory(evidence)
     surfaces = infer_surfaces(evidence)
     governance_applicability = infer_governance_applicability(context, surfaces)
+    governance_materials = collect_governance_materials(evidence, context)
+    deterministic_evidence = infer_deterministic_evidence(evidence)
     representative_files = select_representative_files(evidence)
     text_snippets = collect_text_snippets(evidence, representative_files)
     notes = [
@@ -75,6 +88,8 @@ def prepare_evaluation_context(evidence: ProjectEvidence, context: ProjectContex
         inventory_summary=inventory_summary,
         surfaces=surfaces,
         governance_applicability=governance_applicability,
+        governance_materials=governance_materials,
+        deterministic_evidence=deterministic_evidence,
         representative_files=representative_files,
         text_snippets=text_snippets,
         notes=notes,
@@ -157,6 +172,139 @@ def infer_governance_applicability(
             named.add(hinted_standard)
 
     return records
+
+
+def collect_governance_materials(
+    evidence: ProjectEvidence,
+    context: ProjectContext,
+    limit: int = GOVERNANCE_MATERIAL_LIMIT,
+) -> list[GovernanceMaterial]:
+    materials: list[GovernanceMaterial] = []
+    seen_paths: set[str] = set()
+
+    for standard, path in _context_governance_paths(context).items():
+        if len(materials) >= limit:
+            break
+        _append_governance_material(
+            materials,
+            seen_paths,
+            standard=standard,
+            path=Path(path),
+            display_path=path,
+            source=context.governance_standard_paths.source or "context",
+        )
+
+    root = Path(evidence.root)
+    for relative_path in evidence.detected_records.get("governance", []):
+        if len(materials) >= limit:
+            break
+        _append_governance_material(
+            materials,
+            seen_paths,
+            standard=_standard_from_path(relative_path),
+            path=root / relative_path,
+            display_path=relative_path,
+            source="project_governance_record",
+        )
+
+    return materials
+
+
+def infer_deterministic_evidence(
+    evidence: ProjectEvidence,
+    limit: int = DETERMINISTIC_EVIDENCE_LIMIT,
+) -> list[DeterministicEvidence]:
+    candidates: dict[str, list[DeterministicEvidence]] = {
+        category: [] for category in DETERMINISTIC_EVIDENCE_CATEGORY_LIMITS
+    }
+    seen: set[tuple[str, str]] = set()
+
+    def add(category: str, file_path: str, size_bytes: int, summary: str) -> None:
+        key = (category, file_path)
+        if key in seen:
+            return
+        seen.add(key)
+        candidates.setdefault(category, []).append(
+            DeterministicEvidence(
+                category=category,
+                path=file_path,
+                size_bytes=size_bytes,
+                summary=summary,
+            )
+        )
+
+    for file in evidence.files:
+        path = PurePosixPath(file.path)
+        lower_path = file.path.lower()
+        lower_name = path.name.lower()
+        suffix = path.suffix.lower()
+
+        if _is_test_evidence(path, lower_path):
+            add("test_source", file.path, file.size_bytes, "Test source or fixture present in project inventory.")
+        if _is_build_configuration(lower_name):
+            add("build_configuration", file.path, file.size_bytes, "Build or package configuration present.")
+        if file.role == "release_artifact":
+            add("release_artifact", file.path, file.size_bytes, "Release or packaged artifact present.")
+        if _is_verification_record(lower_path, lower_name, suffix):
+            add("verification_record", file.path, file.size_bytes, "Verification, hash, checklist, or log record present.")
+
+    signals: list[DeterministicEvidence] = []
+    for category, category_limit in DETERMINISTIC_EVIDENCE_CATEGORY_LIMITS.items():
+        for signal in candidates.get(category, [])[:category_limit]:
+            if len(signals) >= limit:
+                return signals
+            signals.append(signal)
+    return signals
+
+
+def _append_governance_material(
+    materials: list[GovernanceMaterial],
+    seen_paths: set[str],
+    *,
+    standard: str,
+    path: Path,
+    display_path: str,
+    source: str,
+) -> None:
+    path_key = str(path.resolve()) if path.exists() else str(path)
+    if path_key in seen_paths:
+        return
+    seen_paths.add(path_key)
+
+    try:
+        content = path.read_bytes()
+    except OSError as exc:
+        materials.append(
+            GovernanceMaterial(
+                standard=standard,
+                path=display_path,
+                source=source,
+                size_bytes=0,
+                sha256="",
+                chars=0,
+                truncated=False,
+                excerpt="",
+                read_error=str(exc),
+            )
+        )
+        return
+
+    excerpt = "\n".join(content.decode("utf-8", errors="replace").splitlines())
+    truncated = len(excerpt) > GOVERNANCE_MATERIAL_CHARS
+    if truncated:
+        excerpt = excerpt[:GOVERNANCE_MATERIAL_CHARS].rstrip() + "\n[governance material truncated]"
+    materials.append(
+        GovernanceMaterial(
+            standard=standard,
+            path=display_path,
+            source=source,
+            size_bytes=len(content),
+            sha256=hashlib.sha256(content).hexdigest(),
+            chars=len(excerpt),
+            truncated=truncated,
+            excerpt=excerpt,
+        )
+    )
 
 
 def select_representative_files(evidence: ProjectEvidence, limit: int = 30) -> list[RepresentativeFile]:
@@ -255,6 +403,63 @@ def _context_governance(context: ProjectContext) -> list[str]:
     if isinstance(expected, str) and expected not in values:
         values.append(expected)
     return values
+
+
+def _context_governance_paths(context: ProjectContext) -> dict[str, str]:
+    value = context.governance_standard_paths.value
+    if not isinstance(value, dict):
+        return {}
+    paths = {}
+    for standard, path in value.items():
+        if isinstance(standard, str) and isinstance(path, str) and standard.strip() and path.strip():
+            paths[standard] = path
+    return paths
+
+
+def _standard_from_path(path: str) -> str:
+    name = PurePosixPath(path).stem
+    upper_name = name.upper()
+    for standard in ["AAMHS", "ARHS", "CTS", "DDS", "DRS", "LDS", "PPS", "SIS", "WDS", "WGS"]:
+        if standard in upper_name:
+            return standard
+    return name
+
+
+def _is_test_evidence(path: PurePosixPath, lower_path: str) -> bool:
+    parts = [part.lower() for part in path.parts]
+    name = path.name.lower()
+    return (
+        "tests" in parts
+        or "test" in parts
+        or any(part.endswith(".tests") for part in parts)
+        or name.startswith("test_")
+        or name.endswith("_test.py")
+        or name.endswith("tests.vb")
+        or name.endswith("tests.cs")
+        or "/tests/" in lower_path
+    )
+
+
+def _is_build_configuration(lower_name: str) -> bool:
+    return lower_name in {
+        "cargo.toml",
+        "directory.build.props",
+        "global.json",
+        "package.json",
+        "project.json",
+        "pyproject.toml",
+        "setup.py",
+        "vite.config.js",
+        "vite.config.ts",
+    } or lower_name.endswith((".csproj", ".fsproj", ".sln", ".slnx", ".vbproj"))
+
+
+def _is_verification_record(lower_path: str, lower_name: str, suffix: str) -> bool:
+    verification_terms = ["verification", "verify", "checklist", "hash", "sha256", "release"]
+    return (
+        any(term in lower_path for term in verification_terms)
+        and suffix in {".json", ".log", ".md", ".txt", ".toml", ".yaml", ".yml"}
+    ) or lower_name.endswith((".sha256", ".sha256sum"))
 
 
 def _confidence(paths: list[str]) -> str:

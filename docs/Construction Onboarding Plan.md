@@ -38,6 +38,9 @@ Current status:
 - Authority record snapshots implemented.
 - Project context extraction implemented.
 - Surface inference and deferred governance-applicability records implemented.
+- Manifest-declared governance standard path extraction implemented.
+- Bounded governance material loading implemented for readable standard files, with missing/unreadable paths recorded as evidence limits.
+- Passive deterministic-evidence signal inference implemented for test sources, build configuration, release artifacts, verification logs, hashes, and checklists.
 - Bounded representative file and text-snippet selection implemented.
 - No-op backend boundary implemented.
 - Provider-neutral reasoning request package implemented.

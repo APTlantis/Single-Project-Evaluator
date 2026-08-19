@@ -28,7 +28,7 @@ The evaluator currently writes:
 - `runs/index.json`
 - `runs/index.md`
 
-The evaluated project is read-only. The current collector inventories files, extracts project context, prepares a bounded reasoning context bundle, writes a provider-neutral reasoning request package, and records discovered project material; it does not run target-project commands, tests, builds, installers, or API calls.
+The evaluated project is read-only. The current collector inventories files, extracts project context, prepares a bounded reasoning context bundle, loads bounded governance material from manifest-declared standard paths when available, records passive deterministic-evidence signals such as test sources, build configuration, release artifacts, verification logs, and hash/checklist records, writes a provider-neutral reasoning request package, and records discovered project material; it does not run target-project commands, tests, builds, installers, or API calls.
 
 Phase 1 supports only the no-op reasoning backend:
 
@@ -50,6 +50,12 @@ Use a validated response file to produce populated assessment/report fields:
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports --backend response-file --response-file reports\response.json
 ```
 
+List preserved evaluation runs from an existing report directory:
+
+```powershell
+python -m single_project_evaluator list-runs --out reports
+```
+
 ## Adoption Postures
 
 - `personal`: optimized for the creator or a narrowly known operator.
@@ -61,7 +67,7 @@ These are evaluation inputs, not maturity levels.
 ## Development
 
 ```powershell
-python -m unittest discover
+python -m unittest discover -s tests
 ```
 
 If system Python is unavailable, use the bundled Codex workspace Python runtime.

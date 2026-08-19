@@ -153,6 +153,10 @@ class SpineTests(unittest.TestCase):
     def test_extract_project_context_reads_city_hall_manifest_shape(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            drs_path = root / "standards" / "DRS" / "README.md"
+            wgs_path = root / "standards" / "WGS" / "README.md"
+            drs_path.parent.mkdir(parents=True)
+            wgs_path.parent.mkdir(parents=True)
             (root / "File Cabinet.manifest.toml").write_text(
                 "\n".join(
                     [
@@ -167,7 +171,9 @@ class SpineTests(unittest.TestCase):
                         "",
                         "[governance]",
                         'primary_standard = "DRS"',
+                        f'primary_standard_path = "{drs_path.as_posix()}"',
                         'additional_standards = ["WGS", "PPS", "AAMHS"]',
+                        f'additional_standard_paths = ["{wgs_path.as_posix()}"]',
                     ]
                 ),
                 encoding="utf-8",
@@ -181,10 +187,17 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(context.lifecycle_state.value, "production")
             self.assertEqual(context.primary_standard.value, "DRS")
             self.assertEqual(context.applicable_governance.value, ["DRS", "WGS", "PPS", "AAMHS"])
+            self.assertEqual(
+                context.governance_standard_paths.value,
+                {"DRS": drs_path.as_posix(), "WGS": wgs_path.as_posix()},
+            )
 
     def test_prepare_evaluation_context_summarizes_surfaces_and_governance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
+            standard_path = root / "standards" / "DRS" / "README.md"
+            standard_path.parent.mkdir(parents=True)
+            standard_path.write_text("# Desktop Application Release Standard\n\nRelease rules.\n", encoding="utf-8")
             (root / "File Cabinet.manifest.toml").write_text(
                 "\n".join(
                     [
@@ -195,6 +208,7 @@ class SpineTests(unittest.TestCase):
                         "",
                         "[governance]",
                         'primary_standard = "DRS"',
+                        f'primary_standard_path = "{standard_path.as_posix()}"',
                         'additional_standards = ["WGS", "PPS"]',
                     ]
                 ),
@@ -220,6 +234,67 @@ class SpineTests(unittest.TestCase):
             records = {record.standard: record for record in prepared.governance_applicability}
             self.assertEqual(records["DRS"].state, ApplicabilityState.DEFERRED)
             self.assertIn("WGS", records)
+            self.assertEqual(len(prepared.governance_materials), 1)
+            self.assertEqual(prepared.governance_materials[0].standard, "DRS")
+            self.assertEqual(prepared.governance_materials[0].path, standard_path.as_posix())
+            self.assertIn("Release rules.", prepared.governance_materials[0].excerpt)
+            self.assertTrue(prepared.governance_materials[0].sha256)
+
+    def test_prepare_evaluation_context_records_missing_governance_material(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            missing_standard = root / "standards" / "DRS" / "README.md"
+            (root / "project.manifest.toml").write_text(
+                "\n".join(
+                    [
+                        "[project]",
+                        'name = "Example"',
+                        "",
+                        "[governance]",
+                        'primary_standard = "DRS"',
+                        f'primary_standard_path = "{missing_standard.as_posix()}"',
+                    ]
+                ),
+                encoding="utf-8",
+            )
+
+            evidence = collect_project_evidence(root)
+            context = extract_project_context(root, evidence)
+            prepared = prepare_evaluation_context(evidence, context)
+
+            self.assertEqual(len(prepared.governance_materials), 1)
+            material = prepared.governance_materials[0]
+            self.assertEqual(material.standard, "DRS")
+            self.assertEqual(material.size_bytes, 0)
+            self.assertEqual(material.sha256, "")
+            self.assertIsNotNone(material.read_error)
+
+    def test_prepare_evaluation_context_infers_deterministic_evidence_signals(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tests_dir = root / "tests"
+            verification_dir = root / "artifacts" / "verification"
+            publish_dir = root / "artifacts" / "publish"
+            tests_dir.mkdir()
+            verification_dir.mkdir(parents=True)
+            publish_dir.mkdir(parents=True)
+            (root / "pyproject.toml").write_text("[project]\nname='Example'\n", encoding="utf-8")
+            (tests_dir / "test_example.py").write_text("def test_example():\n    assert True\n", encoding="utf-8")
+            (verification_dir / "release-hash.txt").write_text("abc  artifact\n", encoding="utf-8")
+            (publish_dir / "Example.exe").write_bytes(b"binary")
+
+            evidence = collect_project_evidence(root)
+            context = extract_project_context(root, evidence)
+            prepared = prepare_evaluation_context(evidence, context)
+
+            categories_by_path = {
+                (signal.category, signal.path)
+                for signal in prepared.deterministic_evidence
+            }
+            self.assertIn(("build_configuration", "pyproject.toml"), categories_by_path)
+            self.assertIn(("test_source", "tests/test_example.py"), categories_by_path)
+            self.assertIn(("verification_record", "artifacts/verification/release-hash.txt"), categories_by_path)
+            self.assertIn(("release_artifact", "artifacts/publish/Example.exe"), categories_by_path)
 
     def test_prepare_evaluation_context_bounds_text_snippets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -469,6 +544,53 @@ class SpineTests(unittest.TestCase):
             self.assertIn("text_snippets", bundle["prepared_context"])
             self.assertEqual(reasoning_request["context_bundle"], bundle)
             self.assertIn("response_contract", reasoning_request)
+
+    def test_cli_lists_preserved_runs(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            stdout = StringIO()
+            with redirect_stdout(stdout):
+                list_exit = main(["list-runs", "--out", str(output)])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(list_exit, 0)
+            output_text = stdout.getvalue()
+            run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            self.assertIn("Timestamp | Project | Posture | Backend | Release | Blockers | Findings | Run", output_text)
+            self.assertIn(project.name, output_text)
+            self.assertIn("shared", output_text)
+            self.assertIn("none", output_text)
+            self.assertIn(run_index["runs"][0]["run_dir"], output_text)
+
+    def test_cli_reports_missing_run_index_without_traceback(self) -> None:
+        with tempfile.TemporaryDirectory() as out_tmp:
+            stderr = StringIO()
+
+            with redirect_stderr(stderr), redirect_stdout(StringIO()):
+                exit_code = main(["list-runs", "--out", str(Path(out_tmp) / "reports")])
+
+            self.assertEqual(exit_code, 1)
+            self.assertIn("error:", stderr.getvalue())
+            self.assertIn("run index not found", stderr.getvalue())
+            self.assertNotIn("Traceback", stderr.getvalue())
 
     def test_cli_can_use_structured_response_file_backend(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:

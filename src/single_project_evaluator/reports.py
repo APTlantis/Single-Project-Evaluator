@@ -175,6 +175,7 @@ def render_markdown_report(evaluation: Evaluation) -> str:
         ("Primary standard", evaluation.context.primary_standard),
         ("Expected delivery standard", evaluation.context.expected_delivery_standard),
         ("Applicable governance", evaluation.context.applicable_governance),
+        ("Governance standard paths", evaluation.context.governance_standard_paths),
         ("PPS path", evaluation.context.pps_path),
         ("README path", evaluation.context.readme_path),
     ]
@@ -225,10 +226,51 @@ def render_markdown_report(evaluation: Evaluation) -> str:
     else:
         lines.append("- No governance applicability records were inferred.")
 
+    lines.extend(["", "### Governance Material", ""])
+    if evaluation.prepared_context.governance_materials:
+        for material in evaluation.prepared_context.governance_materials:
+            lines.extend(
+                [
+                    f"#### {material.standard}: `{material.path}`",
+                    "",
+                    f"- Source: {material.source}",
+                ]
+            )
+            if material.read_error:
+                lines.append(f"- Read error: {material.read_error}")
+            else:
+                lines.extend(
+                    [
+                        f"- Size: {material.size_bytes} bytes",
+                        f"- SHA-256: `{material.sha256}`",
+                        f"- Truncated: {'yes' if material.truncated else 'no'}",
+                        "",
+                        "```text",
+                        material.excerpt or "[empty file]",
+                        "```",
+                    ]
+                )
+            lines.append("")
+    else:
+        lines.append("- No governance standard material was loaded.")
+
     if evaluation.prepared_context.notes:
         lines.append("")
         for note in evaluation.prepared_context.notes:
             lines.append(f"- Prepared context note: {note}")
+
+    lines.extend(["", "### Deterministic Evidence Signals", ""])
+    if evaluation.prepared_context.deterministic_evidence:
+        for signal in evaluation.prepared_context.deterministic_evidence[:30]:
+            lines.append(
+                f"- {signal.category}: `{signal.path}` ({signal.size_bytes} bytes) - {signal.summary}"
+            )
+        if len(evaluation.prepared_context.deterministic_evidence) > 30:
+            lines.append(
+                f"- {len(evaluation.prepared_context.deterministic_evidence) - 30} additional evidence signals are present in `context-bundle.json`."
+            )
+    else:
+        lines.append("- No deterministic evidence signals were inferred.")
 
     lines.extend(["", "### Representative Files", ""])
     if evaluation.prepared_context.representative_files:
@@ -328,10 +370,12 @@ def _pct(value: int | None) -> str:
 
 
 def _context_value(value) -> str:
-    if value.value in (None, [], ""):
+    if value.value in (None, [], {}, ""):
         return "unknown"
     elif isinstance(value.value, list):
         rendered = ", ".join(str(item) for item in value.value)
+    elif isinstance(value.value, dict):
+        rendered = ", ".join(f"{key}={item}" for key, item in sorted(value.value.items()))
     else:
         rendered = str(value.value)
 

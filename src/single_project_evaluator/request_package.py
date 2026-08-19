@@ -90,6 +90,8 @@ def render_reasoning_request_markdown(request: dict[str, Any]) -> str:
             "",
             f"- Representative files: {len(prepared['representative_files'])}",
             f"- Text snippets: {len(prepared['text_snippets'])}",
+            f"- Governance material records: {len(prepared.get('governance_materials', []))}",
+            f"- Deterministic evidence signals: {len(prepared.get('deterministic_evidence', []))}",
             "",
             "## Response Contract",
             "",
