@@ -9,6 +9,7 @@ from contextlib import redirect_stderr
 from io import StringIO
 from pathlib import Path
 from unittest.mock import patch
+from urllib.error import URLError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -53,6 +54,7 @@ def _finding(
     authority: str = "engineering_recommendation",
     applicability: str | None = None,
     recommendation: str | None = None,
+    evidence: list[str] | None = None,
 ) -> dict:
     return {
         "title": title,
@@ -60,7 +62,7 @@ def _finding(
         "area": "Adoption Posture",
         "authority": authority,
         "applicability": applicability,
-        "evidence": ["README.md"],
+        "evidence": evidence or ["README.md"],
         "impact": "This verifies posture-specific evaluator semantics.",
         "consequence": "The report should preserve the distinction without collapsing it into one score.",
         "recommendation": recommendation,
@@ -267,7 +269,10 @@ class SpineTests(unittest.TestCase):
             root = Path(tmp)
             standard_path = root / "standards" / "DRS" / "README.md"
             standard_path.parent.mkdir(parents=True)
-            standard_path.write_text("# Desktop Application Release Standard\n\nRelease rules.\n", encoding="utf-8")
+            standard_path.write_text(
+                "# Desktop Application Release Standard\n\n**Version:** 2026.08\n\nRelease rules.\n",
+                encoding="utf-8",
+            )
             (root / "File Cabinet.manifest.toml").write_text(
                 "\n".join(
                     [
@@ -308,6 +313,7 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(prepared.governance_materials[0].standard, "DRS")
             self.assertEqual(prepared.governance_materials[0].path, standard_path.as_posix())
             self.assertIn("Release rules.", prepared.governance_materials[0].excerpt)
+            self.assertEqual(prepared.governance_materials[0].standard_version, "2026.08")
             self.assertTrue(prepared.governance_materials[0].sha256)
 
     def test_prepare_evaluation_context_records_missing_governance_material(self) -> None:
@@ -398,6 +404,11 @@ class SpineTests(unittest.TestCase):
         with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
             with self.assertRaises(ValueError):
                 create_backend("openai")
+
+    def test_create_backend_rejects_invalid_openai_retries(self) -> None:
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+            with self.assertRaises(ValueError):
+                create_backend("openai", model="gpt-test", retries=4)
 
     def test_openai_backend_blocks_likely_sensitive_outbound_context(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
@@ -616,6 +627,43 @@ class SpineTests(unittest.TestCase):
                     finding_class="required",
                     authority="governance_requirement",
                     applicability="unsatisfied",
+                )
+            ],
+        )
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_accepts_uncertainty_backed_observation(self) -> None:
+        response = _response(
+            posture_fitness="Shared - Adequate",
+            findings=[
+                _finding(
+                    title="Verification evidence is incomplete",
+                    finding_class="observation",
+                    applicability=None,
+                    evidence=["uncertainty: no test execution record was supplied"],
+                )
+            ],
+        )
+
+        assessment, findings, _, _, _ = parse_backend_response(response)
+
+        self.assertEqual(assessment.release_eligibility, "NOT APPLICABLE")
+        self.assertEqual(findings[0].evidence, ["uncertainty: no test execution record was supplied"])
+
+    def test_parse_backend_response_rejects_required_unsatisfied_when_only_uncertain(self) -> None:
+        response = _response(
+            posture_fitness="Shared - Adequate",
+            release_eligibility="BLOCKED",
+            blockers=1,
+            findings=[
+                _finding(
+                    title="Feature may be broken but evidence is missing",
+                    finding_class="required",
+                    authority="project_requirement",
+                    applicability="unsatisfied",
+                    evidence=["uncertainty: no runtime verification evidence was supplied"],
                 )
             ],
         )
@@ -1850,6 +1898,51 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(data["assessment"]["functional_completeness"], 88)
             self.assertEqual(data["governance_conformance"]["PPS"], "N/A (0/0 applicable controls satisfied)")
             self.assertIn("The mocked API result was parsed.", (output / "report.md").read_text(encoding="utf-8"))
+
+    def test_cli_retries_transient_openai_transport_error(self) -> None:
+        class FakeHTTPResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self) -> bytes:
+                return json.dumps({"output_text": json.dumps(build_response_template("shared"))}).encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+                with patch(
+                    "single_project_evaluator.backend.urlopen",
+                    side_effect=[URLError("temporary network issue"), FakeHTTPResponse()],
+                ) as openai_call:
+                    with redirect_stdout(StringIO()):
+                        exit_code = main(
+                            [
+                                "evaluate",
+                                "--project",
+                                str(project),
+                                "--posture",
+                                AdoptionPosture.SHARED.value,
+                                "--out",
+                                str(output),
+                                "--backend",
+                                "openai",
+                                "--model",
+                                "gpt-test",
+                                "--retries",
+                                "1",
+                            ]
+                        )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(openai_call.call_count, 2)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            self.assertEqual(data["run"]["configuration"]["retries"], 1)
 
     def test_cli_can_explicitly_allow_sensitive_hosted_context(self) -> None:
         class FakeHTTPResponse:

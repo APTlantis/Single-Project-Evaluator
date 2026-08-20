@@ -122,6 +122,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="HTTP timeout in seconds for --backend openai.",
     )
     evaluate.add_argument(
+        "--retries",
+        default=0,
+        type=int,
+        help="Additional transport retry attempts for --backend openai, from 0 to 3.",
+    )
+    evaluate.add_argument(
         "--allow-sensitive-hosted",
         action="store_true",
         help="Allow --backend openai to send context even when likely secrets are detected.",
@@ -230,6 +236,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
         model=args.model,
         api_base=args.api_base,
         timeout_seconds=args.timeout_seconds,
+        retries=args.retries,
         allow_sensitive=args.allow_sensitive_hosted,
     )
     run = EvaluationRun(
@@ -248,6 +255,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
             "model": args.model,
             "api_base": args.api_base if args.backend == "openai" else None,
             "timeout_seconds": args.timeout_seconds if args.backend == "openai" else None,
+            "retries": args.retries if args.backend == "openai" else None,
             "allow_sensitive_hosted": args.allow_sensitive_hosted if args.backend == "openai" else None,
         },
     )

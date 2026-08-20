@@ -39,7 +39,7 @@ Current status:
 - Project context extraction implemented.
 - Surface inference and deferred governance-applicability records implemented.
 - Manifest-declared governance standard path extraction implemented.
-- Bounded governance material loading implemented for readable standard files, with missing/unreadable paths recorded as evidence limits.
+- Bounded governance material loading implemented for readable standard files, with missing/unreadable paths recorded as evidence limits and readable standard version hints preserved when declared.
 - Passive deterministic-evidence signal inference implemented for test sources, build configuration, release artifacts, verification logs, hashes, and checklists.
 - Bounded representative file and text-snippet selection implemented.
 - No-op backend boundary implemented.
@@ -57,6 +57,7 @@ Current status:
 - Preserved run completion implemented with `complete-run`, allowing a structured response file to generate a new completed run from saved context without rereading the evaluated project.
 - Optional OpenAI Responses API backend implemented behind explicit `--backend openai` selection.
 - OpenAI backend requests schema-guided Structured Outputs before parser validation.
+- OpenAI request timeout and bounded transport retry configuration are exposed and preserved in run provenance.
 - Hosted OpenAI requests are blocked by default when outbound authority records, governance material, or text snippets contain likely secrets; `--allow-sensitive-hosted` is required to override after explicit operator acceptance.
 - Hosted response provenance records non-secret response id/status/model/service-tier/usage metadata without storing raw model output or credentials.
 - Model-backed evaluation is available only when explicitly selected with credentials and a model; passive/no-op and manual response-file workflows remain supported.
@@ -88,6 +89,7 @@ Current status:
 - Personal fixture verifies creator-specific/non-adoptable assumptions can be appropriate at personal posture.
 - Shared fixture verifies Deferred governance applicability is preserved without becoming a release blocker.
 - Adoptable fixture verifies high completeness and implementation quality can coexist with BLOCKED release eligibility.
+- Unsupported-claim handling now accepts explicit `uncertainty:` evidence references for observations while rejecting Required/Unsatisfied findings backed only by uncertainty.
 
 ### Phase 4: CTS Release Work
 

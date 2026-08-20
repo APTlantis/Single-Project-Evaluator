@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 from pathlib import PurePosixPath
 
@@ -64,6 +65,10 @@ TEXT_SNIPPET_CHARS = 1200
 TEXT_SNIPPET_LIMIT = 18
 GOVERNANCE_MATERIAL_CHARS = 2000
 GOVERNANCE_MATERIAL_LIMIT = 8
+GOVERNANCE_VERSION_PATTERN = re.compile(
+    r"^(?:\*\*)?(?:standard\s+version|version)(?:\*\*)?\s*[:=]\s*[\"']?(?P<version>[^\"'\n]+?)[\"']?\s*$",
+    re.IGNORECASE,
+)
 DETERMINISTIC_EVIDENCE_LIMIT = 40
 DETERMINISTIC_EVIDENCE_CATEGORY_LIMITS = {
     "verification_record": 12,
@@ -289,7 +294,9 @@ def _append_governance_material(
         )
         return
 
-    excerpt = "\n".join(content.decode("utf-8", errors="replace").splitlines())
+    text = content.decode("utf-8", errors="replace")
+    standard_version = _extract_governance_version(text)
+    excerpt = "\n".join(text.splitlines())
     truncated = len(excerpt) > GOVERNANCE_MATERIAL_CHARS
     if truncated:
         excerpt = excerpt[:GOVERNANCE_MATERIAL_CHARS].rstrip() + "\n[governance material truncated]"
@@ -303,8 +310,19 @@ def _append_governance_material(
             chars=len(excerpt),
             truncated=truncated,
             excerpt=excerpt,
+            standard_version=standard_version,
         )
     )
+
+
+def _extract_governance_version(text: str) -> str | None:
+    for line in text.splitlines()[:80]:
+        candidate = line.strip().strip("#").strip().replace("**", "")
+        match = GOVERNANCE_VERSION_PATTERN.match(candidate)
+        if match:
+            version = match.group("version").strip()
+            return version or None
+    return None
 
 
 def select_representative_files(evidence: ProjectEvidence, limit: int = 30) -> list[RepresentativeFile]:

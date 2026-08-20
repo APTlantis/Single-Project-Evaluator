@@ -141,6 +141,7 @@ class GovernanceMaterial:
     chars: int
     truncated: bool
     excerpt: str
+    standard_version: str | None = None
     read_error: str | None = None
 
 

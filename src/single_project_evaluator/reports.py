@@ -271,6 +271,7 @@ def render_markdown_report(evaluation: Evaluation) -> str:
                 lines.extend(
                     [
                         f"- Size: {material.size_bytes} bytes",
+                        f"- Standard version: `{material.standard_version or 'unavailable'}`",
                         f"- SHA-256: `{material.sha256}`",
                         f"- Truncated: {'yes' if material.truncated else 'no'}",
                         "",

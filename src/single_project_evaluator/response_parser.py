@@ -26,6 +26,7 @@ GOVERNANCE_CONFORMANCE_PATTERN = re.compile(
     r"^(?P<percent>100|[1-9]?\d)% \((?P<satisfied>0|[1-9]\d*)/(?P<applicable>0|[1-9]\d*) applicable controls satisfied\)$"
 )
 GOVERNANCE_CONFORMANCE_NOT_APPLICABLE = "N/A (0/0 applicable controls satisfied)"
+UNCERTAINTY_EVIDENCE_PREFIX = "uncertainty:"
 
 
 def parse_backend_response(
@@ -68,7 +69,7 @@ def _parse_finding(data: Any) -> Finding:
     if not isinstance(data, dict):
         raise ResponseValidationError("Each finding must be an object.")
     applicability = data.get("applicability")
-    return Finding(
+    finding = Finding(
         title=_required_string(data, "title"),
         finding_class=FindingClass(_required_string(data, "finding_class")),
         area=_required_string(data, "area"),
@@ -79,6 +80,8 @@ def _parse_finding(data: Any) -> Finding:
         consequence=_required_string(data, "consequence"),
         recommendation=_optional_string(data.get("recommendation"), "recommendation"),
     )
+    _validate_finding_evidence_strength(finding)
+    return finding
 
 
 def _parse_governance_conformance(value: Any) -> dict[str, str]:
@@ -184,6 +187,7 @@ def _validate_finding_blocker_consistency(assessment: AssessmentProfile, finding
         for finding in findings
         if finding.finding_class == FindingClass.REQUIRED
         and finding.applicability == ApplicabilityState.UNSATISFIED
+        and _has_demonstrated_evidence(finding)
     ]
     if assessment.blockers > len(blocker_findings):
         raise ResponseValidationError(
@@ -193,6 +197,22 @@ def _validate_finding_blocker_consistency(assessment: AssessmentProfile, finding
         raise ResponseValidationError(
             "required findings with unsatisfied applicability require BLOCKED release_eligibility."
         )
+
+
+def _validate_finding_evidence_strength(finding: Finding) -> None:
+    if (
+        finding.finding_class == FindingClass.REQUIRED
+        and finding.applicability == ApplicabilityState.UNSATISFIED
+        and not _has_demonstrated_evidence(finding)
+    ):
+        raise ResponseValidationError(
+            "required findings with unsatisfied applicability must include demonstrated evidence, "
+            "not only uncertainty references."
+        )
+
+
+def _has_demonstrated_evidence(finding: Finding) -> bool:
+    return any(not item.strip().lower().startswith(UNCERTAINTY_EVIDENCE_PREFIX) for item in finding.evidence)
 
 
 def _optional_string(value: Any, key: str) -> str | None:

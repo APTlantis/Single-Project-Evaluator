@@ -117,6 +117,7 @@ class OpenAIResponsesBackend:
         api_key: str | None = None,
         api_base: str = "https://api.openai.com/v1/responses",
         timeout_seconds: int = 120,
+        retries: int = 0,
         allow_sensitive: bool = False,
     ) -> None:
         api_key = api_key or os.environ.get("OPENAI_API_KEY")
@@ -126,9 +127,12 @@ class OpenAIResponsesBackend:
             raise ValueError("--model is required when --backend openai is used.")
         if timeout_seconds <= 0:
             raise ValueError("--timeout-seconds must be greater than zero.")
+        if retries < 0 or retries > 3:
+            raise ValueError("--retries must be between 0 and 3.")
         self.api_key = api_key
         self.api_base = api_base
         self.timeout_seconds = timeout_seconds
+        self.retries = retries
         self.allow_sensitive = allow_sensitive
         self.identity = BackendIdentity(provider="openai", model_identifier=model)
 
@@ -228,14 +232,7 @@ class OpenAIResponsesBackend:
             },
             method="POST",
         )
-        try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
-                response_body = response.read().decode("utf-8")
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
-            raise ValueError(f"OpenAI API request failed with HTTP {exc.code}: {detail}") from exc
-        except URLError as exc:
-            raise ValueError(f"OpenAI API request failed: {exc}") from exc
+        response_body = self._send_with_retries(request)
 
         try:
             data = json.loads(response_body)
@@ -245,6 +242,22 @@ class OpenAIResponsesBackend:
             raise ValueError("OpenAI API response must be a JSON object.")
         return data
 
+    def _send_with_retries(self, request: Request) -> str:
+        attempts = self.retries + 1
+        last_url_error: URLError | None = None
+        for attempt in range(1, attempts + 1):
+            try:
+                with urlopen(request, timeout=self.timeout_seconds) as response:
+                    return response.read().decode("utf-8")
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")
+                raise ValueError(f"OpenAI API request failed with HTTP {exc.code}: {detail}") from exc
+            except URLError as exc:
+                last_url_error = exc
+                if attempt == attempts:
+                    break
+        raise ValueError(f"OpenAI API request failed after {attempts} attempt(s): {last_url_error}") from last_url_error
+
 
 def create_backend(
     name: str,
@@ -253,6 +266,7 @@ def create_backend(
     model: str | None = None,
     api_base: str = "https://api.openai.com/v1/responses",
     timeout_seconds: int = 120,
+    retries: int = 0,
     allow_sensitive: bool = False,
 ) -> NoopReasoningBackend | ResponseFileBackend | OpenAIResponsesBackend:
     if name == "none":
@@ -268,6 +282,7 @@ def create_backend(
             model=model,
             api_base=api_base,
             timeout_seconds=timeout_seconds,
+            retries=retries,
             allow_sensitive=allow_sensitive,
         )
     raise ValueError(f"Unsupported reasoning backend: {name}")
