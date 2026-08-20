@@ -50,6 +50,7 @@ Current status:
 - Release eligibility validation now requires BLOCKED to have blockers and PASS/NOT APPLICABLE to have zero blockers.
 - Blocker validation now requires blocker counts to be backed by Required/Unsatisfied findings and rejects hidden Required/Unsatisfied findings in non-blocked responses.
 - Optional backend narrative preservation and report rendering implemented for response-file runs.
+- Reports now include a deterministic Priority Findings section ordered Required, Should, Could, then Observation.
 - Posture-aware response validation and fillable `response-template.json` artifact implemented to bridge prepared context to response-file evaluation.
 - Preserved run inspection and integrity validation implemented with `list-runs`, `show-run`, and `validate-run`, including JSON output.
 - `validate-run` checks backend response metadata hygiene so hosted provenance cannot silently preserve raw model output or likely credentials.

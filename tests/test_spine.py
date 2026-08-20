@@ -1037,6 +1037,57 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(response_template, build_response_template("shared"))
             parse_backend_response(response_template, expected_posture="shared")
 
+    def test_cli_report_orders_priority_findings(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "response.json"
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+            response_file.write_text(
+                json.dumps(
+                    _response(
+                        posture_fitness="Shared - Marginal",
+                        release_eligibility="BLOCKED",
+                        blockers=1,
+                        findings=[
+                            _finding(title="Optional polish", finding_class="could"),
+                            _finding(title="Release checklist missing", finding_class="required", applicability="unsatisfied"),
+                            _finding(title="Useful implementation context", finding_class="observation"),
+                            _finding(title="Setup documentation is thin", finding_class="should"),
+                        ],
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            report = (output / "report.md").read_text(encoding="utf-8")
+            priority_index = report.index("## Priority Findings")
+            required_index = report.index("- Required: Release checklist missing", priority_index)
+            should_index = report.index("- Should: Setup documentation is thin", priority_index)
+            could_index = report.index("- Could: Optional polish", priority_index)
+            observation_index = report.index("- Observation: Useful implementation context", priority_index)
+            self.assertLess(required_index, should_index)
+            self.assertLess(should_index, could_index)
+            self.assertLess(could_index, observation_index)
+
     def test_evaluation_from_dict_roundtrips_preserved_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
             project = Path(project_tmp)
