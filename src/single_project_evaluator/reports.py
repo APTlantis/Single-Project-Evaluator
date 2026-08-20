@@ -396,6 +396,7 @@ def render_markdown_report(evaluation: Evaluation) -> str:
                 "",
                 f"- Area: {finding.area}",
                 f"- Authority: {finding.authority}",
+                f"- Applicability: {finding.applicability.value if finding.applicability else 'not specified'}",
                 f"- Impact: {finding.impact}",
                 f"- Consequence: {finding.consequence}",
             ]

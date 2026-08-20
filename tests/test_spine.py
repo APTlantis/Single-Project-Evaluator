@@ -1254,6 +1254,8 @@ class SpineTests(unittest.TestCase):
             self.assertLess(required_index, should_index)
             self.assertLess(should_index, could_index)
             self.assertLess(could_index, observation_index)
+            required_detail_index = report.index("### Required: Release checklist missing")
+            self.assertIn("- Applicability: unsatisfied", report[required_detail_index:])
 
     def test_evaluation_from_dict_roundtrips_preserved_artifact(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:

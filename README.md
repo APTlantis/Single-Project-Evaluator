@@ -57,7 +57,7 @@ When `governance_conformance` includes a standard, its value must use a percenta
 
 `release_eligibility` and `blockers` must agree: `BLOCKED` requires at least one blocker, while `PASS` and `NOT APPLICABLE` require zero blockers.
 Each blocker must be supported by a `required` finding with `unsatisfied` applicability; `PASS` and `NOT APPLICABLE` responses cannot contain hidden Required/Unsatisfied findings.
-Reports include a Priority Findings section that orders findings as Required, Should, Could, then Observation.
+Reports include a Priority Findings section that orders findings as Required, Should, Could, then Observation. Detailed findings include area, authority, applicability, impact, consequence, recommendation, and evidence.
 
 Use `command-contract` to inspect the supported commands, JSON mode guarantees, exit codes, generated artifact contract, and read-only/sensitive-context safety boundaries:
 
