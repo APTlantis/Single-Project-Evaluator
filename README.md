@@ -51,6 +51,7 @@ Response-file runs preserve the response file path, size, and SHA-256 in run con
 
 Every returned finding must include at least one non-empty evidence reference or explicit uncertainty reference. Responses with unsupported findings are rejected before report generation.
 Explicit evidence limits should be written as evidence entries beginning with `uncertainty:`. Uncertainty-only evidence is accepted for observations and recommendations, but `required` findings with `unsatisfied` applicability must include demonstrated evidence.
+Response-file validation rejects unsupported response, assessment, and finding fields so evaluations cannot collapse into an undeclared overall score.
 
 When `governance_conformance` includes a standard, its value must use a percentage plus satisfied/applicable count, such as `75% (3/4 applicable controls satisfied)`, or `N/A (0/0 applicable controls satisfied)` when no controls are applicable.
 

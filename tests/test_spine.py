@@ -640,6 +640,23 @@ class SpineTests(unittest.TestCase):
         with self.assertRaises(ResponseValidationError):
             parse_backend_response(response)
 
+    def test_parse_backend_response_rejects_overall_score_field(self) -> None:
+        response = _response(posture_fitness="Shared - Adequate")
+        response["assessment"]["overall_score"] = 84
+
+        with self.assertRaisesRegex(ResponseValidationError, "overall_score"):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_rejects_unknown_finding_field(self) -> None:
+        response = _response(
+            posture_fitness="Shared - Adequate",
+            findings=[_finding(title="Example finding")],
+        )
+        response["findings"][0]["score"] = 10
+
+        with self.assertRaisesRegex(ResponseValidationError, "score"):
+            parse_backend_response(response)
+
     def test_parse_backend_response_rejects_invalid_assessment_vocabulary(self) -> None:
         response = {
             "assessment": {

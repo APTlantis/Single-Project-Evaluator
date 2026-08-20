@@ -46,6 +46,7 @@ Current status:
 - Provider-neutral reasoning request package implemented.
 - Structured backend response validation implemented.
 - Finding validation now requires each returned finding to include at least one non-empty evidence or uncertainty reference.
+- Response validation rejects unsupported response, assessment, and finding fields, including undeclared overall-score fields.
 - Governance conformance validation now requires percentage plus satisfied/applicable count strings when conformance entries are present.
 - Release eligibility validation now requires BLOCKED to have blockers and PASS/NOT APPLICABLE to have zero blockers.
 - Blocker validation now requires blocker counts to be backed by Required/Unsatisfied findings and rejects hidden Required/Unsatisfied findings in non-blocked responses.

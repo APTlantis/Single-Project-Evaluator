@@ -27,6 +27,28 @@ GOVERNANCE_CONFORMANCE_PATTERN = re.compile(
 )
 GOVERNANCE_CONFORMANCE_NOT_APPLICABLE = "N/A (0/0 applicable controls satisfied)"
 UNCERTAINTY_EVIDENCE_PREFIX = "uncertainty:"
+RESPONSE_KEYS = {"assessment", "findings", "governance_conformance", "uncertainties", "narrative"}
+ASSESSMENT_KEYS = {
+    "functional_completeness",
+    "implementation_quality",
+    "intent_fidelity",
+    "verification_confidence",
+    "posture_fitness",
+    "lifecycle_fitness",
+    "release_eligibility",
+    "blockers",
+}
+FINDING_KEYS = {
+    "title",
+    "finding_class",
+    "area",
+    "authority",
+    "applicability",
+    "evidence",
+    "impact",
+    "consequence",
+    "recommendation",
+}
 
 
 def parse_backend_response(
@@ -36,6 +58,7 @@ def parse_backend_response(
     if not isinstance(data, dict):
         raise ResponseValidationError("Backend response must be a JSON object.")
 
+    _reject_unknown_keys(data, RESPONSE_KEYS, "response")
     assessment = _parse_assessment(_required_dict(data, "assessment"))
     _validate_expected_posture(assessment.posture_fitness, expected_posture)
     findings = [_parse_finding(item) for item in _required_list(data, "findings")]
@@ -50,6 +73,7 @@ def parse_backend_response(
 
 
 def _parse_assessment(data: dict[str, Any]) -> AssessmentProfile:
+    _reject_unknown_keys(data, ASSESSMENT_KEYS, "assessment")
     release_eligibility = _enum_string(data, "release_eligibility", RELEASE_ELIGIBILITY_VALUES)
     blockers = _nonnegative_int(data.get("blockers"), "blockers")
     _validate_release_blocker_consistency(release_eligibility, blockers)
@@ -68,6 +92,7 @@ def _parse_assessment(data: dict[str, Any]) -> AssessmentProfile:
 def _parse_finding(data: Any) -> Finding:
     if not isinstance(data, dict):
         raise ResponseValidationError("Each finding must be an object.")
+    _reject_unknown_keys(data, FINDING_KEYS, "finding")
     applicability = data.get("applicability")
     finding = Finding(
         title=_required_string(data, "title"),
@@ -126,6 +151,12 @@ def _required_dict(data: dict[str, Any], key: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ResponseValidationError(f"{key} must be an object.")
     return value
+
+
+def _reject_unknown_keys(data: dict[str, Any], allowed_keys: set[str], label: str) -> None:
+    unknown = sorted(str(key) for key in data if key not in allowed_keys)
+    if unknown:
+        raise ResponseValidationError(f"{label} contains unsupported field(s): {', '.join(unknown)}.")
 
 
 def _required_list(data: dict[str, Any], key: str) -> list[Any]:
