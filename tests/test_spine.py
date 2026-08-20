@@ -2110,6 +2110,63 @@ class SpineTests(unittest.TestCase):
             refreshed_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
             self.assertEqual(len(refreshed_index["runs"]), 1)
 
+    def test_cli_validate_run_rejects_completed_run_invalid_response_file_metadata_hash(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "response.json"
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            response_file.write_text(json.dumps(build_response_template("shared")), encoding="utf-8")
+            with redirect_stdout(StringIO()):
+                complete_exit = main(
+                    [
+                        "complete-run",
+                        "--out",
+                        str(output),
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            completed_run_dir = output / "runs" / run_index["runs"][0]["run_dir"]
+            evaluation_path = completed_run_dir / "evaluation.json"
+            run_record_path = completed_run_dir / "run-record.json"
+            evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+            evaluation["run"]["configuration"]["response_file_sha256"] = "not-a-hash"
+            evaluation_path.write_text(json.dumps(evaluation, indent=2), encoding="utf-8")
+            run_record_path.write_text(json.dumps(evaluation["run"], indent=2), encoding="utf-8")
+
+            stdout = StringIO()
+            stderr = StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                validate_exit = main(["validate-run", "--out", str(output), "--json"])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(complete_exit, 0)
+            self.assertEqual(validate_exit, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_type"], "ValueError")
+            self.assertIn("run.configuration.response_file_sha256", payload["error"])
+
     def test_cli_can_use_mocked_openai_backend(self) -> None:
         class FakeHTTPResponse:
             def __enter__(self):

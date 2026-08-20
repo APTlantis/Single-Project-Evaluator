@@ -123,7 +123,7 @@ python -m single_project_evaluator validate-run --out reports
 python -m single_project_evaluator validate-run --out reports --run 93dfff32 --json
 ```
 
-`validate-run` also checks artifact-manifest completeness/integrity and hosted-response metadata hygiene, including that `run.configuration.backend_response` does not contain raw model output, credentials, or likely secret values.
+`validate-run` also checks artifact-manifest completeness/integrity, response-file provenance metadata shape, and hosted-response metadata hygiene, including that `run.configuration.backend_response` does not contain raw model output, credentials, or likely secret values.
 
 ## Command Contract
 
