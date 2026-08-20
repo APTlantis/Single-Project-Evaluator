@@ -67,7 +67,7 @@ def _parse_finding(data: Any) -> Finding:
         area=_required_string(data, "area"),
         authority=FindingAuthority(_required_string(data, "authority")),
         applicability=ApplicabilityState(applicability) if applicability else None,
-        evidence=_string_list(data.get("evidence"), "evidence"),
+        evidence=_nonempty_string_list(data.get("evidence"), "evidence"),
         impact=_required_string(data, "impact"),
         consequence=_required_string(data, "consequence"),
         recommendation=_optional_string(data.get("recommendation"), "recommendation"),
@@ -139,6 +139,15 @@ def _string_list(value: Any, key: str) -> list[str]:
     if not all(isinstance(item, str) for item in value):
         raise ResponseValidationError(f"{key} must contain only strings.")
     return value
+
+
+def _nonempty_string_list(value: Any, key: str) -> list[str]:
+    items = _string_list(value, key)
+    if not items:
+        raise ResponseValidationError(f"{key} must contain at least one evidence reference.")
+    if not all(item.strip() for item in items):
+        raise ResponseValidationError(f"{key} must contain only non-empty strings.")
+    return items
 
 
 def _optional_percent(value: Any, key: str) -> int | None:

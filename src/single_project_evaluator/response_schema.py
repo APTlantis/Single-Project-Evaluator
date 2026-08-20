@@ -89,7 +89,11 @@ EVALUATION_RESPONSE_SCHEMA: dict[str, Any] = {
                         "type": ["string", "null"],
                         "enum": ["satisfied", "unsatisfied", "deferred", "not_applicable", None],
                     },
-                    "evidence": {"type": "array", "items": {"type": "string"}},
+                    "evidence": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": {"type": "string", "minLength": 1},
+                    },
                     "impact": {"type": "string", "minLength": 1},
                     "consequence": {"type": "string", "minLength": 1},
                     "recommendation": {"type": ["string", "null"]},
