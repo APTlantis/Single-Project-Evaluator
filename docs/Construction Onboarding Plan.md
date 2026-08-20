@@ -95,6 +95,7 @@ Current status:
 - Personal fixture verifies creator-specific/non-adoptable assumptions can be appropriate at personal posture.
 - Shared fixture verifies Deferred governance applicability is preserved without becoming a release blocker.
 - Adoptable fixture verifies high completeness and implementation quality can coexist with BLOCKED release eligibility.
+- Adoptable onboarding fixture verifies missing independent-operator onboarding can block release even when implementation quality and governance conformance are strong.
 - Unsupported-claim handling now accepts explicit `uncertainty:` evidence references for observations while rejecting Required/Unsatisfied findings backed only by uncertainty.
 - Additional fixtures verify low functional completeness can coexist with high implementation quality, insufficient verification evidence is reported as uncertainty rather than demonstrated failure, and full governance conformance can coexist with implementation-quality problems.
 - Mixed-surface fixture verifies deterministic context preparation can infer multiple governed surfaces and defer CTS/WDS applicability separately.

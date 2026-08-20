@@ -2868,6 +2868,71 @@ class SpineTests(unittest.TestCase):
             self.assertIn("Implementation Quality: 42%", report)
             self.assertIn("Should: Central workflow mixes parsing, state mutation, and reporting", report)
 
+    def test_adoptable_fixture_treats_missing_onboarding_as_release_blocker(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "adoptable-onboarding-response.json"
+            (project / "README.md").write_text(
+                "# Adoptable Operator Tool\n\nA packaged command tool intended for independent operators.\n",
+                encoding="utf-8",
+            )
+            response_file.write_text(
+                json.dumps(
+                    _response(
+                        posture_fitness="Adoptable - Marginal",
+                        release_eligibility="BLOCKED",
+                        blockers=1,
+                        functional_completeness=88,
+                        implementation_quality=86,
+                        findings=[
+                            _finding(
+                                title="Independent operator onboarding is not yet documented",
+                                finding_class="required",
+                                authority="adoption_recommendation",
+                                applicability="unsatisfied",
+                                evidence=["README.md: independent install and first-run workflow absent"],
+                                recommendation="Add install, configuration, first-run, and recovery instructions before adoptable release.",
+                            )
+                        ],
+                        governance_conformance={"CTS": "100% (4/4 applicable controls satisfied)"},
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.ADOPTABLE.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            report = (output / "report.md").read_text(encoding="utf-8")
+            self.assertEqual(data["assessment"]["functional_completeness"], 88)
+            self.assertEqual(data["assessment"]["implementation_quality"], 86)
+            self.assertEqual(data["assessment"]["posture_fitness"], "Adoptable - Marginal")
+            self.assertEqual(data["assessment"]["release_eligibility"], "BLOCKED")
+            self.assertEqual(data["assessment"]["blockers"], 1)
+            self.assertEqual(data["findings"][0]["finding_class"], "required")
+            self.assertEqual(data["findings"][0]["authority"], "adoption_recommendation")
+            self.assertEqual(data["findings"][0]["applicability"], "unsatisfied")
+            self.assertEqual(data["governance_conformance"]["CTS"], "100% (4/4 applicable controls satisfied)")
+            self.assertIn("Release Eligibility: BLOCKED", report)
+            self.assertIn("Required: Independent operator onboarding is not yet documented", report)
+
     def test_cli_rejects_response_file_with_mismatched_declared_posture(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
             project = Path(project_tmp)
