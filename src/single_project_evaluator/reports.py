@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -17,6 +18,7 @@ ARTIFACT_FILENAMES = {
     "reasoning_request_md": "reasoning-request.md",
     "response_template": "response-template.json",
 }
+ARTIFACT_MANIFEST_FILENAME = "artifact-manifest.json"
 FINDING_PRIORITY = {
     FindingClass.REQUIRED: 0,
     FindingClass.SHOULD: 1,
@@ -44,6 +46,9 @@ def write_evaluation_artifacts(evaluation: Evaluation, output_dir: Path) -> dict
         encoding="utf-8",
     )
     paths["report"].write_text(render_markdown_report(evaluation), encoding="utf-8")
+    manifest_path = run_dir / ARTIFACT_MANIFEST_FILENAME
+    _write_artifact_manifest(manifest_path, evaluation, paths)
+    paths["artifact_manifest"] = manifest_path
 
     latest_paths = _write_latest_aliases(paths, output_dir)
     index_paths = _write_run_index(output_dir)
@@ -63,7 +68,32 @@ def _write_latest_aliases(paths: dict[str, Path], output_dir: Path) -> dict[str,
         latest = output_dir / filename
         shutil.copyfile(paths[key], latest)
         latest_paths[f"latest_{key}"] = latest
+    if "artifact_manifest" in paths:
+        latest = output_dir / ARTIFACT_MANIFEST_FILENAME
+        shutil.copyfile(paths["artifact_manifest"], latest)
+        latest_paths["latest_artifact_manifest"] = latest
     return latest_paths
+
+
+def _write_artifact_manifest(manifest_path: Path, evaluation: Evaluation, paths: dict[str, Path]) -> None:
+    artifacts = {}
+    for key, path in sorted(paths.items()):
+        if key == "artifact_manifest":
+            continue
+        content = path.read_bytes()
+        artifacts[path.name] = {
+            "key": key,
+            "path": path.name,
+            "size_bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+        }
+    manifest = {
+        "manifest_version": "0.1",
+        "report_id": evaluation.run.report_id,
+        "timestamp_utc": evaluation.run.timestamp_utc,
+        "artifacts": artifacts,
+    }
+    manifest_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
 
 def _write_run_index(output_dir: Path) -> dict[str, Path]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from dataclasses import replace
@@ -78,6 +79,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="single-project-evaluator",
         description="Read-only single-project evaluation spine.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {__version__}",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -660,6 +666,11 @@ def _validate_run_artifacts(entry: dict, artifacts: dict[str, Path]) -> list[dic
         raise ValueError("reasoning-request.md is empty.")
     pass_check("markdown_artifacts_nonempty")
 
+    manifest_path = artifacts["evaluation"].parent / "artifact-manifest.json"
+    if manifest_path.exists():
+        _validate_artifact_manifest(manifest_path, report_id)
+        pass_check("artifact_manifest_integrity")
+
     return checks
 
 
@@ -667,6 +678,28 @@ def _required_mapping(value: object, label: str) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be a JSON object.")
     return value
+
+
+def _validate_artifact_manifest(manifest_path: Path, report_id: str) -> None:
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_data = _required_mapping(manifest, "artifact-manifest.json")
+    if manifest_data.get("report_id") != report_id:
+        raise ValueError("artifact-manifest.json report ID does not match evaluation.json.")
+    artifacts = _required_mapping(manifest_data.get("artifacts"), "artifact-manifest.json artifacts")
+    for filename, record in artifacts.items():
+        if not isinstance(filename, str) or not filename:
+            raise ValueError("artifact-manifest.json artifact names must be non-empty strings.")
+        record_data = _required_mapping(record, f"artifact-manifest.json artifacts.{filename}")
+        artifact_path = manifest_path.parent / filename
+        if not artifact_path.exists():
+            raise ValueError(f"artifact-manifest.json references missing artifact: {filename}")
+        content = artifact_path.read_bytes()
+        expected_size = record_data.get("size_bytes")
+        expected_hash = record_data.get("sha256")
+        if expected_size != len(content):
+            raise ValueError(f"artifact-manifest.json size mismatch for artifact: {filename}")
+        if expected_hash != hashlib.sha256(content).hexdigest():
+            raise ValueError(f"artifact-manifest.json hash mismatch for artifact: {filename}")
 
 
 BACKEND_RESPONSE_FORBIDDEN_KEYS = {

@@ -13,6 +13,7 @@ The project has moved from the Phase 1 evaluation spine into early Phase 2. The 
 
 ```powershell
 python -m pip install -e .
+python -m single_project_evaluator --version
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports
 ```
 
@@ -25,6 +26,7 @@ The evaluator currently writes:
 - `reasoning-request.json`
 - `reasoning-request.md`
 - `response-template.json`
+- `artifact-manifest.json`
 - `runs/<timestamp>-<report-id>/...`
 - `runs/index.json`
 - `runs/index.md`

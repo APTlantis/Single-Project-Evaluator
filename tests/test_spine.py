@@ -22,6 +22,7 @@ from single_project_evaluator.models import AdoptionPosture, ApplicabilityState,
 from single_project_evaluator.request_package import build_reasoning_request, build_response_template
 from single_project_evaluator.response_parser import ResponseValidationError, parse_backend_response
 from single_project_evaluator.serialization import evaluation_from_dict
+from single_project_evaluator import __version__
 
 
 def _assessment(
@@ -95,6 +96,16 @@ def _response(
 
 
 class SpineTests(unittest.TestCase):
+    def test_cli_can_print_version(self) -> None:
+        stdout = StringIO()
+
+        with redirect_stdout(stdout):
+            with self.assertRaises(SystemExit) as raised:
+                main(["--version"])
+
+        self.assertEqual(raised.exception.code, 0)
+        self.assertIn(__version__, stdout.getvalue())
+
     def test_collect_project_evidence_detects_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -372,6 +383,28 @@ class SpineTests(unittest.TestCase):
             self.assertIn(("verification_record", "artifacts/verification/release-hash.txt"), categories_by_path)
             self.assertIn(("release_artifact", "artifacts/publish/Example.exe"), categories_by_path)
 
+    def test_prepare_evaluation_context_infers_mixed_surface_governance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "pyproject.toml").write_text("[project]\nname='Example'\n", encoding="utf-8")
+            (root / "package.json").write_text('{"scripts":{"build":"vite build"}}\n', encoding="utf-8")
+            (root / "app.py").write_text("print('command surface')\n", encoding="utf-8")
+            (root / "src").mkdir()
+            (root / "src" / "App.tsx").write_text("export function App() { return null }\n", encoding="utf-8")
+
+            evidence = collect_project_evidence(root)
+            context = extract_project_context(root, evidence)
+            prepared = prepare_evaluation_context(evidence, context)
+
+            surface_kinds = {surface.kind for surface in prepared.surfaces}
+            governance_states = {
+                applicability.standard: applicability.state for applicability in prepared.governance_applicability
+            }
+            self.assertIn(SurfaceKind.COMMAND_TOOL, surface_kinds)
+            self.assertIn(SurfaceKind.WEBSITE, surface_kinds)
+            self.assertEqual(governance_states["CTS"], ApplicabilityState.DEFERRED)
+            self.assertEqual(governance_states["WDS"], ApplicabilityState.DEFERRED)
+
     def test_prepare_evaluation_context_bounds_text_snippets(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -470,6 +503,26 @@ class SpineTests(unittest.TestCase):
         self.assertNotIn("assessment", request["context_bundle"])
         self.assertIn("response_contract", request)
         self.assertIn("instructions", request)
+
+    def test_examples_readme_documents_core_workflows(self) -> None:
+        examples_readme = Path(__file__).resolve().parents[1] / "examples" / "README.md"
+        text = examples_readme.read_text(encoding="utf-8")
+
+        for command in [
+            "--version",
+            "evaluate --project",
+            "--backend none",
+            "validate-response",
+            "--backend response-file",
+            "complete-run",
+            "--backend openai",
+            "list-runs",
+            "show-run",
+            "validate-run",
+        ]:
+            self.assertIn(command, text)
+        self.assertIn("place `--out` outside the target project tree", text)
+        self.assertIn("uncertainty:", text)
 
     def test_response_template_matches_parser_contract(self) -> None:
         template = build_response_template()
@@ -1054,12 +1107,14 @@ class SpineTests(unittest.TestCase):
             self.assertTrue((output / "reasoning-request.json").exists())
             self.assertTrue((output / "reasoning-request.md").exists())
             self.assertTrue((output / "response-template.json").exists())
+            self.assertTrue((output / "artifact-manifest.json").exists())
             run_dirs = list((output / "runs").iterdir())
             materialized_run_dirs = [path for path in run_dirs if path.is_dir()]
             self.assertEqual(len(materialized_run_dirs), 1)
             self.assertTrue((materialized_run_dirs[0] / "evaluation.json").exists())
             self.assertTrue((materialized_run_dirs[0] / "report.md").exists())
             self.assertTrue((materialized_run_dirs[0] / "response-template.json").exists())
+            self.assertTrue((materialized_run_dirs[0] / "artifact-manifest.json").exists())
             self.assertTrue((output / "runs" / "index.json").exists())
             self.assertTrue((output / "runs" / "index.md").exists())
 
@@ -1069,9 +1124,13 @@ class SpineTests(unittest.TestCase):
             bundle = json.loads((output / "context-bundle.json").read_text(encoding="utf-8"))
             reasoning_request = json.loads((output / "reasoning-request.json").read_text(encoding="utf-8"))
             response_template = json.loads((output / "response-template.json").read_text(encoding="utf-8"))
+            artifact_manifest = json.loads((output / "artifact-manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(data, run_data)
             self.assertEqual(len(run_index["runs"]), 1)
             self.assertEqual(run_index["runs"][0]["report_id"], data["run"]["report_id"])
+            self.assertEqual(artifact_manifest["report_id"], data["run"]["report_id"])
+            self.assertIn("evaluation.json", artifact_manifest["artifacts"])
+            self.assertIn("sha256", artifact_manifest["artifacts"]["evaluation.json"])
             self.assertEqual(data["run"]["declared_posture"], "shared")
             self.assertEqual(data["run"]["reasoning_provider"], "none")
             self.assertEqual(data["run"]["configuration"]["backend"], "none")
@@ -1475,6 +1534,7 @@ class SpineTests(unittest.TestCase):
             self.assertIn("run_record_consistency", check_names)
             self.assertIn("response_template_contract", check_names)
             self.assertIn("backend_response_metadata_hygiene", check_names)
+            self.assertIn("artifact_manifest_integrity", check_names)
 
     def test_cli_validate_run_reports_missing_artifact_with_json_error(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
@@ -1513,6 +1573,44 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(payload["error_type"], "ValueError")
             self.assertIn("missing required artifacts", payload["error"])
             self.assertIn("response_template", payload["error"])
+
+    def test_cli_validate_run_rejects_artifact_manifest_hash_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            run_dir = output / "runs" / run_index["runs"][0]["run_dir"]
+            (run_dir / "report.md").write_text("# Tampered report\n", encoding="utf-8")
+
+            stdout = StringIO()
+            stderr = StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                validate_exit = main(["validate-run", "--out", str(output), "--json"])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(validate_exit, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertIn("mismatch", payload["error"])
+            self.assertIn("report.md", payload["error"])
 
     def test_cli_validate_run_requires_response_template_posture_to_match_run(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
@@ -2259,6 +2357,190 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(data["findings"][0]["applicability"], "unsatisfied")
             self.assertIn("Functional Completeness: 94%", report)
             self.assertIn("Release Eligibility: BLOCKED", report)
+
+    def test_fixture_can_be_low_completeness_but_high_quality(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "low-completeness-response.json"
+            (project / "README.md").write_text(
+                "# Small Core\n\nA carefully built project with only one planned workflow implemented so far.\n",
+                encoding="utf-8",
+            )
+            response_file.write_text(
+                json.dumps(
+                    _response(
+                        posture_fitness="Shared - Marginal",
+                        functional_completeness=35,
+                        implementation_quality=88,
+                        findings=[
+                            _finding(
+                                title="Implemented slice is narrow but coherent",
+                                finding_class="observation",
+                                authority="engineering_recommendation",
+                                applicability="satisfied",
+                                recommendation="Keep implementation quality separate from remaining scope.",
+                            ),
+                            _finding(
+                                title="Additional declared workflows remain unimplemented",
+                                finding_class="should",
+                                authority="project_requirement",
+                                applicability="unsatisfied",
+                                recommendation="Complete the remaining declared workflows before broadening use.",
+                            ),
+                        ],
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            report = (output / "report.md").read_text(encoding="utf-8")
+            self.assertEqual(data["assessment"]["functional_completeness"], 35)
+            self.assertEqual(data["assessment"]["implementation_quality"], 88)
+            self.assertEqual(data["assessment"]["release_eligibility"], "NOT APPLICABLE")
+            self.assertIn("Functional Completeness: 35%", report)
+            self.assertIn("Implementation Quality: 88%", report)
+            self.assertLess(
+                report.index("- Should: Additional declared workflows remain unimplemented"),
+                report.index("- Observation: Implemented slice is narrow but coherent"),
+            )
+
+    def test_fixture_distinguishes_insufficient_verification_from_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "verification-limits-response.json"
+            (project / "README.md").write_text(
+                "# Verification Limited Tool\n\nThe project has source evidence but no preserved test execution log.\n",
+                encoding="utf-8",
+            )
+            response_file.write_text(
+                json.dumps(
+                    _response(
+                        posture_fitness="Shared - Adequate",
+                        findings=[
+                            _finding(
+                                title="Runtime behavior is not verified by supplied evidence",
+                                finding_class="observation",
+                                authority="engineering_recommendation",
+                                applicability=None,
+                                evidence=[
+                                    "uncertainty: no test execution log or runtime verification record was supplied"
+                                ],
+                                recommendation="Preserve a verification record before relying on runtime behavior claims.",
+                            )
+                        ],
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            report = (output / "report.md").read_text(encoding="utf-8")
+            self.assertEqual(data["assessment"]["release_eligibility"], "NOT APPLICABLE")
+            self.assertEqual(data["assessment"]["blockers"], 0)
+            self.assertEqual(data["findings"][0]["finding_class"], "observation")
+            self.assertEqual(
+                data["findings"][0]["evidence"],
+                ["uncertainty: no test execution log or runtime verification record was supplied"],
+            )
+            self.assertIn("Runtime behavior is not verified by supplied evidence", report)
+            self.assertNotIn("Required: Runtime behavior is not verified by supplied evidence", report)
+
+    def test_fixture_can_be_governance_compliant_with_implementation_quality_problem(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "governance-compliant-quality-response.json"
+            (project / "README.md").write_text(
+                "# Compliant Tool\n\nGovernance records are complete, but the implementation is hard to maintain.\n",
+                encoding="utf-8",
+            )
+            response_file.write_text(
+                json.dumps(
+                    _response(
+                        posture_fitness="Shared - Adequate",
+                        functional_completeness=82,
+                        implementation_quality=42,
+                        findings=[
+                            _finding(
+                                title="Central workflow mixes parsing, state mutation, and reporting",
+                                finding_class="should",
+                                authority="engineering_recommendation",
+                                applicability="unsatisfied",
+                                recommendation="Separate parsing, state mutation, and report rendering responsibilities.",
+                            )
+                        ],
+                        governance_conformance={"CTS": "100% (5/5 applicable controls satisfied)"},
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            report = (output / "report.md").read_text(encoding="utf-8")
+            self.assertEqual(data["governance_conformance"]["CTS"], "100% (5/5 applicable controls satisfied)")
+            self.assertEqual(data["assessment"]["implementation_quality"], 42)
+            self.assertEqual(data["assessment"]["release_eligibility"], "NOT APPLICABLE")
+            self.assertEqual(data["findings"][0]["authority"], "engineering_recommendation")
+            self.assertIn("CTS: 100% (5/5 applicable controls satisfied)", report)
+            self.assertIn("Implementation Quality: 42%", report)
+            self.assertIn("Should: Central workflow mixes parsing, state mutation, and reporting", report)
 
     def test_cli_rejects_response_file_with_mismatched_declared_posture(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:

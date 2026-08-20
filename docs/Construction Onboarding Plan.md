@@ -90,6 +90,8 @@ Current status:
 - Shared fixture verifies Deferred governance applicability is preserved without becoming a release blocker.
 - Adoptable fixture verifies high completeness and implementation quality can coexist with BLOCKED release eligibility.
 - Unsupported-claim handling now accepts explicit `uncertainty:` evidence references for observations while rejecting Required/Unsatisfied findings backed only by uncertainty.
+- Additional fixtures verify low functional completeness can coexist with high implementation quality, insufficient verification evidence is reported as uncertainty rather than demonstrated failure, and full governance conformance can coexist with implementation-quality problems.
+- Mixed-surface fixture verifies deterministic context preparation can infer multiple governed surfaces and defer CTS/WDS applicability separately.
 
 ### Phase 4: CTS Release Work
 
@@ -98,8 +100,8 @@ Objectives:
 - Stabilize command contract.
 - Add machine-readable output guarantees. Started for `evaluate --json`, `validate-response --json`, `list-runs --json`, `show-run --json`, `validate-run --json`, and `complete-run --json` success/error output.
 - Define exit codes. Started with success `0`, clean command error `1`, and usage/help fallback `2`.
-- Document examples.
-- Preserve release evidence.
+- Document examples. Started with passive, manual response-file, hosted OpenAI, and preserved-run inspection workflows in `examples/README.md`.
+- Preserve release evidence. Started with `artifact-manifest.json` hashes for generated run artifacts and `validate-run` manifest integrity checks.
 
 Release work must not be confused with evaluation-engine completeness.
 
