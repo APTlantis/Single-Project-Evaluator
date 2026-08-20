@@ -80,6 +80,8 @@ def main(argv: list[str] | None = None) -> int:
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             _print_error(exc, json_output=args.json)
             return EXIT_COMMAND_ERROR
+    if args.command == "command-contract":
+        return command_contract_command(args)
 
     parser.print_help()
     return EXIT_USAGE
@@ -234,7 +236,91 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Print machine-readable success or error output instead of text.",
     )
+
+    command_contract = subparsers.add_parser(
+        "command-contract",
+        help="Print the evaluator command, exit-code, and artifact contract.",
+    )
+    command_contract.add_argument(
+        "--json",
+        action="store_true",
+        help="Print the full machine-readable command contract.",
+    )
     return parser
+
+
+def command_contract_command(args: argparse.Namespace) -> int:
+    contract = _command_contract_payload()
+    if args.json:
+        print(json.dumps(contract, indent=2))
+        return EXIT_OK
+
+    print(f"Single-Project Evaluator command contract {contract['contract_version']}")
+    print(f"Evaluator version: {contract['evaluator_version']}")
+    print("Commands:")
+    for command in contract["commands"]:
+        json_mode = "yes" if command["json_success"] else "no"
+        print(f"- {command['name']} (json success: {json_mode})")
+    print("Exit codes:")
+    for code, description in contract["exit_codes"].items():
+        print(f"- {code}: {description}")
+    print("Required run artifacts:")
+    for artifact in contract["artifact_contract"]["required_run_artifacts"]:
+        print(f"- {artifact}")
+    return EXIT_OK
+
+
+def _command_contract_payload() -> dict:
+    command_names = [
+        "evaluate",
+        "validate-response",
+        "list-runs",
+        "show-run",
+        "validate-run",
+        "complete-run",
+        "command-contract",
+    ]
+    json_success_commands = {
+        "evaluate",
+        "validate-response",
+        "list-runs",
+        "show-run",
+        "validate-run",
+        "complete-run",
+        "command-contract",
+    }
+    return {
+        "status": "ok",
+        "contract_version": "0.1",
+        "evaluator_version": __version__,
+        "commands": [
+            {
+                "name": name,
+                "json_success": name in json_success_commands,
+                "json_errors": name != "command-contract",
+            }
+            for name in command_names
+        ],
+        "exit_codes": {
+            str(EXIT_OK): "command completed successfully",
+            str(EXIT_COMMAND_ERROR): "clean command input or runtime error without traceback",
+            str(EXIT_USAGE): "command-line usage error or help fallback",
+        },
+        "artifact_contract": {
+            "required_run_artifacts": sorted(REQUIRED_MANIFEST_ARTIFACTS),
+            "latest_aliases": sorted(REQUIRED_MANIFEST_ARTIFACTS | {"artifact-manifest.json"}),
+            "run_index": "runs/index.json",
+            "run_index_markdown": "runs/index.md",
+            "artifact_manifest": "artifact-manifest.json",
+        },
+        "safety_contract": {
+            "evaluated_project_read_only": True,
+            "output_must_be_outside_project": True,
+            "active_target_commands_default": False,
+            "hosted_openai_backend_explicit_only": True,
+            "hosted_sensitive_context_blocked_by_default": True,
+        },
+    }
 
 
 def evaluate_command(args: argparse.Namespace) -> int:

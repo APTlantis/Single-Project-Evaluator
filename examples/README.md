@@ -10,6 +10,7 @@ Create a preserved evidence package without model-backed reasoning:
 
 ```powershell
 python -m single_project_evaluator --version
+python -m single_project_evaluator command-contract --json
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out D:\CTS\Single-Project Evaluator\reports --backend none
 ```
 
@@ -19,7 +20,7 @@ Use JSON mode when another tool needs machine-readable output:
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out D:\CTS\Single-Project Evaluator\reports --backend none --json
 ```
 
-The run writes `evaluation.json`, `report.md`, `run-record.json`, `context-bundle.json`, `reasoning-request.json`, `reasoning-request.md`, and `response-template.json`.
+The run writes `evaluation.json`, `report.md`, `run-record.json`, `context-bundle.json`, `reasoning-request.json`, `reasoning-request.md`, `response-template.json`, and `artifact-manifest.json`.
 
 ## Manual Response Workflow
 

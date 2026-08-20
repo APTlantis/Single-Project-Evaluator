@@ -520,10 +520,52 @@ class SpineTests(unittest.TestCase):
             "list-runs",
             "show-run",
             "validate-run",
+            "command-contract",
         ]:
             self.assertIn(command, text)
         self.assertIn("place `--out` outside the target project tree", text)
         self.assertIn("uncertainty:", text)
+
+    def test_cli_command_contract_can_print_json(self) -> None:
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            exit_code = main(["command-contract", "--json"])
+
+        self.assertEqual(exit_code, 0)
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["contract_version"], "0.1")
+        self.assertEqual(payload["evaluator_version"], __version__)
+        command_names = {command["name"] for command in payload["commands"]}
+        self.assertEqual(
+            command_names,
+            {
+                "evaluate",
+                "validate-response",
+                "list-runs",
+                "show-run",
+                "validate-run",
+                "complete-run",
+                "command-contract",
+            },
+        )
+        self.assertEqual(payload["exit_codes"]["0"], "command completed successfully")
+        self.assertIn("evaluation.json", payload["artifact_contract"]["required_run_artifacts"])
+        self.assertIn("artifact-manifest.json", payload["artifact_contract"]["latest_aliases"])
+        self.assertTrue(payload["safety_contract"]["evaluated_project_read_only"])
+        self.assertTrue(payload["safety_contract"]["hosted_sensitive_context_blocked_by_default"])
+
+    def test_cli_command_contract_can_print_text_summary(self) -> None:
+        stdout = StringIO()
+        with redirect_stdout(stdout):
+            exit_code = main(["command-contract"])
+
+        self.assertEqual(exit_code, 0)
+        text = stdout.getvalue()
+        self.assertIn("Single-Project Evaluator command contract", text)
+        self.assertIn("evaluate", text)
+        self.assertIn("Required run artifacts", text)
+        self.assertIn("evaluation.json", text)
 
     def test_response_template_matches_parser_contract(self) -> None:
         template = build_response_template()

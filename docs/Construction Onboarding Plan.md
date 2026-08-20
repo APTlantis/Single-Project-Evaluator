@@ -106,6 +106,7 @@ Objectives:
 - Stabilize command contract.
 - Add machine-readable output guarantees. Started for `evaluate --json`, `validate-response --json`, `list-runs --json`, `show-run --json`, `validate-run --json`, and `complete-run --json` success/error output.
 - Define exit codes. Started with success `0`, clean command error `1`, and usage/help fallback `2`.
+- Expose the command contract. Started with `command-contract --json` for supported commands, JSON guarantees, exit codes, artifact contract, and safety boundaries.
 - Document examples. Started with passive, manual response-file, hosted OpenAI, and preserved-run inspection workflows in `examples/README.md`.
 - Preserve release evidence. Started with `artifact-manifest.json` hashes for generated run artifacts and `validate-run` manifest integrity checks.
 

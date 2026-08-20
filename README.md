@@ -14,6 +14,7 @@ The project has moved from the Phase 1 evaluation spine into early Phase 2. The 
 ```powershell
 python -m pip install -e .
 python -m single_project_evaluator --version
+python -m single_project_evaluator command-contract --json
 python -m single_project_evaluator evaluate --project D:\Some\Project --posture shared --out reports
 ```
 
@@ -56,6 +57,13 @@ When `governance_conformance` includes a standard, its value must use a percenta
 `release_eligibility` and `blockers` must agree: `BLOCKED` requires at least one blocker, while `PASS` and `NOT APPLICABLE` require zero blockers.
 Each blocker must be supported by a `required` finding with `unsatisfied` applicability; `PASS` and `NOT APPLICABLE` responses cannot contain hidden Required/Unsatisfied findings.
 Reports include a Priority Findings section that orders findings as Required, Should, Could, then Observation.
+
+Use `command-contract` to inspect the supported commands, JSON mode guarantees, exit codes, generated artifact contract, and read-only/sensitive-context safety boundaries:
+
+```powershell
+python -m single_project_evaluator command-contract
+python -m single_project_evaluator command-contract --json
+```
 
 Each evaluation writes `response-template.json` as a fillable skeleton matching the structured backend response contract and the run's declared posture. Use it with `reasoning-request.json` or `reasoning-request.md` when preparing an external/manual reasoning response.
 
