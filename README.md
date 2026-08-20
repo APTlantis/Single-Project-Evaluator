@@ -46,6 +46,7 @@ python -m single_project_evaluator evaluate --project D:\Some\Project --posture 
 ```
 
 The current backend boundary includes a no-op backend, a response-file backend, an optional OpenAI Responses API backend, and a response parser/validator for the structured model response. Structured backend responses may include an optional markdown `narrative` field, which is preserved in `evaluation.json` and rendered in `report.md`.
+Response-file runs preserve the response file path, size, and SHA-256 in run configuration metadata.
 
 Every returned finding must include at least one non-empty evidence reference or explicit uncertainty reference. Responses with unsupported findings are rejected before report generation.
 Explicit evidence limits should be written as evidence entries beginning with `uncertainty:`. Uncertainty-only evidence is accepted for observations and recommendations, but `required` findings with `unsatisfied` applicability must include demonstrated evidence.
@@ -122,7 +123,7 @@ python -m single_project_evaluator validate-run --out reports
 python -m single_project_evaluator validate-run --out reports --run 93dfff32 --json
 ```
 
-`validate-run` also checks hosted-response metadata hygiene, including that `run.configuration.backend_response` does not contain raw model output, credentials, or likely secret values.
+`validate-run` also checks artifact-manifest completeness/integrity and hosted-response metadata hygiene, including that `run.configuration.backend_response` does not contain raw model output, credentials, or likely secret values.
 
 ## Command Contract
 

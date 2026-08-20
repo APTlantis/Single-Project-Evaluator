@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 from dataclasses import asdict
 from dataclasses import dataclass
 from pathlib import Path
@@ -92,7 +93,8 @@ class ResponseFileBackend:
         prepared_context: PreparedContext,
     ) -> BackendResult:
         try:
-            data = json.loads(self.response_file.read_text(encoding="utf-8"))
+            response_bytes = self.response_file.read_bytes()
+            data = json.loads(response_bytes.decode("utf-8"))
         except OSError as exc:
             raise ValueError(f"Could not read response file `{self.response_file}`: {exc}") from exc
         except json.JSONDecodeError as exc:
@@ -105,7 +107,11 @@ class ResponseFileBackend:
             governance_conformance=result.governance_conformance,
             uncertainties=result.uncertainties,
             narrative=result.narrative,
-            metadata={"response_file": str(self.response_file)},
+            metadata={
+                "response_file": str(self.response_file),
+                "response_file_size_bytes": len(response_bytes),
+                "response_file_sha256": hashlib.sha256(response_bytes).hexdigest(),
+            },
         )
 
 

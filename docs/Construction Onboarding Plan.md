@@ -50,11 +50,17 @@ Current status:
 - Release eligibility validation now requires BLOCKED to have blockers and PASS/NOT APPLICABLE to have zero blockers.
 - Blocker validation now requires blocker counts to be backed by Required/Unsatisfied findings and rejects hidden Required/Unsatisfied findings in non-blocked responses.
 - Optional backend narrative preservation and report rendering implemented for response-file runs.
+- Response-file runs preserve response file path, size, and SHA-256 provenance.
+- `validate-run` checks response-file provenance metadata shape when response-file metadata is present.
 - Reports now include a deterministic Priority Findings section ordered Required, Should, Could, then Observation.
 - Posture-aware response validation and fillable `response-template.json` artifact implemented to bridge prepared context to response-file evaluation.
 - Preserved run inspection and integrity validation implemented with `list-runs`, `show-run`, and `validate-run`, including JSON output.
+- `validate-run` checks the selected run-index summary against canonical `evaluation.json` fields.
+- `validate-run` checks root latest aliases against the newest indexed run artifacts.
+- `validate-run` checks artifact-manifest completeness, simple artifact filenames, byte sizes, and SHA-256 hashes when a manifest is present.
 - `validate-run` checks backend response metadata hygiene so hosted provenance cannot silently preserve raw model output or likely credentials.
 - Preserved run completion implemented with `complete-run`, allowing a structured response file to generate a new completed run from saved context without rereading the evaluated project.
+- `complete-run` validates the selected source run before reusing its preserved context.
 - Optional OpenAI Responses API backend implemented behind explicit `--backend openai` selection.
 - OpenAI backend requests schema-guided Structured Outputs before parser validation.
 - OpenAI request timeout and bounded transport retry configuration are exposed and preserved in run provenance.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import sys
 from dataclasses import replace
 from datetime import UTC, datetime
@@ -28,6 +29,15 @@ from .sensitivity import describe_sensitive_matches, find_sensitive_text
 EXIT_OK = 0
 EXIT_COMMAND_ERROR = 1
 EXIT_USAGE = 2
+REQUIRED_MANIFEST_ARTIFACTS = {
+    "context-bundle.json",
+    "evaluation.json",
+    "reasoning-request.json",
+    "reasoning-request.md",
+    "report.md",
+    "response-template.json",
+    "run-record.json",
+}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -439,7 +449,12 @@ def validate_run_command(args: argparse.Namespace) -> int:
     entry = _select_run(runs, args.run, index_path)
     run_dir = output_dir / "runs" / str(entry["run_dir"])
     artifacts = _run_artifact_paths(run_dir)
-    checks = _validate_run_artifacts(entry, artifacts)
+    checks = _validate_run_artifacts(
+        entry,
+        artifacts,
+        output_dir=output_dir,
+        validate_latest_aliases=entry.get("run_dir") == runs[0].get("run_dir"),
+    )
     payload = {
         "status": "ok",
         "index_path": str(index_path),
@@ -462,6 +477,13 @@ def complete_run_command(args: argparse.Namespace) -> int:
     index_path, runs = _read_run_index(output_dir)
     source_entry = _select_run(runs, args.run, index_path)
     source_run_dir = output_dir / "runs" / str(source_entry["run_dir"])
+    source_artifacts = _run_artifact_paths(source_run_dir)
+    _validate_run_artifacts(
+        source_entry,
+        source_artifacts,
+        output_dir=output_dir,
+        validate_latest_aliases=source_entry.get("run_dir") == runs[0].get("run_dir"),
+    )
     source_evaluation_path = source_run_dir / "evaluation.json"
     if not source_evaluation_path.exists():
         raise FileNotFoundError(
@@ -470,7 +492,8 @@ def complete_run_command(args: argparse.Namespace) -> int:
 
     source_evaluation = evaluation_from_dict(json.loads(source_evaluation_path.read_text(encoding="utf-8")))
     response_file = Path(args.response_file)
-    response_data = json.loads(response_file.read_text(encoding="utf-8"))
+    response_bytes = response_file.read_bytes()
+    response_data = json.loads(response_bytes.decode("utf-8"))
     assessment, findings, governance_conformance, uncertainties, narrative = parse_backend_response(
         response_data,
         expected_posture=source_evaluation.run.declared_posture.value,
@@ -487,6 +510,8 @@ def complete_run_command(args: argparse.Namespace) -> int:
             "active_target_commands": False,
             "backend": "response-file",
             "response_file": str(response_file),
+            "response_file_size_bytes": len(response_bytes),
+            "response_file_sha256": hashlib.sha256(response_bytes).hexdigest(),
             "completed_from_run_dir": source_entry["run_dir"],
             "completed_from_report_id": source_evaluation.run.report_id,
             "reused_preserved_context": True,
@@ -613,7 +638,13 @@ def _run_artifact_paths(run_dir: Path) -> dict[str, Path]:
     return {key: run_dir / filename for key, filename in names.items()}
 
 
-def _validate_run_artifacts(entry: dict, artifacts: dict[str, Path]) -> list[dict[str, str]]:
+def _validate_run_artifacts(
+    entry: dict,
+    artifacts: dict[str, Path],
+    *,
+    output_dir: Path,
+    validate_latest_aliases: bool,
+) -> list[dict[str, str]]:
     checks: list[dict[str, str]] = []
 
     def pass_check(name: str) -> None:
@@ -637,6 +668,9 @@ def _validate_run_artifacts(entry: dict, artifacts: dict[str, Path]) -> list[dic
     if entry.get("report_id") != report_id:
         raise ValueError("run index and evaluation.json report IDs do not match.")
     pass_check("report_id_consistency")
+
+    _validate_run_index_entry(entry, artifacts["evaluation"].parent.name, evaluation)
+    pass_check("run_index_entry_consistency")
 
     if run_record != _required_mapping(evaluation, "evaluation").get("run", {}):
         raise ValueError("run-record.json does not match evaluation.json run record.")
@@ -670,6 +704,9 @@ def _validate_run_artifacts(entry: dict, artifacts: dict[str, Path]) -> list[dic
     if manifest_path.exists():
         _validate_artifact_manifest(manifest_path, report_id)
         pass_check("artifact_manifest_integrity")
+    if validate_latest_aliases:
+        _validate_latest_aliases(output_dir, artifacts, manifest_path)
+        pass_check("latest_alias_consistency")
 
     return checks
 
@@ -680,15 +717,41 @@ def _required_mapping(value: object, label: str) -> dict:
     return value
 
 
+def _validate_run_index_entry(entry: dict, run_dir_name: str, evaluation: dict) -> None:
+    run = _required_mapping(evaluation, "evaluation").get("run", {})
+    assessment = _required_mapping(evaluation, "evaluation").get("assessment", {})
+    expected = {
+        "run_dir": run_dir_name,
+        "report_id": run.get("report_id"),
+        "timestamp_utc": run.get("timestamp_utc"),
+        "project_root": run.get("project_root"),
+        "declared_posture": run.get("declared_posture"),
+        "reasoning_provider": run.get("reasoning_provider"),
+        "model_identifier": run.get("model_identifier"),
+        "release_eligibility": assessment.get("release_eligibility"),
+        "blockers": assessment.get("blockers"),
+        "finding_count": len(evaluation.get("findings", [])),
+    }
+    for key, expected_value in expected.items():
+        if entry.get(key) != expected_value:
+            raise ValueError(f"run index entry field `{key}` does not match evaluation.json.")
+
+
 def _validate_artifact_manifest(manifest_path: Path, report_id: str) -> None:
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     manifest_data = _required_mapping(manifest, "artifact-manifest.json")
     if manifest_data.get("report_id") != report_id:
         raise ValueError("artifact-manifest.json report ID does not match evaluation.json.")
     artifacts = _required_mapping(manifest_data.get("artifacts"), "artifact-manifest.json artifacts")
+    missing_records = sorted(REQUIRED_MANIFEST_ARTIFACTS - set(artifacts))
+    if missing_records:
+        missing_list = ", ".join(missing_records)
+        raise ValueError(f"artifact-manifest.json is missing artifact records: {missing_list}")
     for filename, record in artifacts.items():
         if not isinstance(filename, str) or not filename:
             raise ValueError("artifact-manifest.json artifact names must be non-empty strings.")
+        if Path(filename).name != filename or "/" in filename or "\\" in filename:
+            raise ValueError("artifact-manifest.json artifact names must be simple filenames.")
         record_data = _required_mapping(record, f"artifact-manifest.json artifacts.{filename}")
         artifact_path = manifest_path.parent / filename
         if not artifact_path.exists():
@@ -700,6 +763,21 @@ def _validate_artifact_manifest(manifest_path: Path, report_id: str) -> None:
             raise ValueError(f"artifact-manifest.json size mismatch for artifact: {filename}")
         if expected_hash != hashlib.sha256(content).hexdigest():
             raise ValueError(f"artifact-manifest.json hash mismatch for artifact: {filename}")
+
+
+def _validate_latest_aliases(output_dir: Path, artifacts: dict[str, Path], manifest_path: Path) -> None:
+    for key, run_artifact_path in artifacts.items():
+        latest_path = output_dir / run_artifact_path.name
+        if not latest_path.exists():
+            raise ValueError(f"latest alias is missing for artifact: {run_artifact_path.name}")
+        if latest_path.read_bytes() != run_artifact_path.read_bytes():
+            raise ValueError(f"latest alias does not match newest run artifact: {run_artifact_path.name}")
+    if manifest_path.exists():
+        latest_manifest = output_dir / "artifact-manifest.json"
+        if not latest_manifest.exists():
+            raise ValueError("latest alias is missing for artifact: artifact-manifest.json")
+        if latest_manifest.read_bytes() != manifest_path.read_bytes():
+            raise ValueError("latest alias does not match newest run artifact: artifact-manifest.json")
 
 
 BACKEND_RESPONSE_FORBIDDEN_KEYS = {
@@ -714,6 +792,7 @@ BACKEND_RESPONSE_FORBIDDEN_KEYS = {
     "raw_response",
     "secret",
 }
+SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 
 
 def _validate_backend_response_metadata(run: dict) -> None:
@@ -726,6 +805,7 @@ def _validate_backend_response_metadata(run: dict) -> None:
     if not isinstance(metadata, dict):
         raise ValueError("run.configuration.backend_response must be an object when present.")
     _validate_metadata_value(metadata, "run.configuration.backend_response")
+    _validate_response_file_metadata(metadata)
 
 
 def _validate_metadata_value(value: object, path: str) -> None:
@@ -748,3 +828,14 @@ def _validate_metadata_value(value: object, path: str) -> None:
                 "run.configuration.backend_response contains likely sensitive metadata: "
                 + describe_sensitive_matches(matches)
             )
+
+
+def _validate_response_file_metadata(metadata: dict) -> None:
+    if "response_file_sha256" not in metadata and "response_file_size_bytes" not in metadata:
+        return
+    sha256 = metadata.get("response_file_sha256")
+    size_bytes = metadata.get("response_file_size_bytes")
+    if not isinstance(sha256, str) or not SHA256_PATTERN.fullmatch(sha256):
+        raise ValueError("run.configuration.backend_response.response_file_sha256 must be a SHA-256 hex digest.")
+    if not isinstance(size_bytes, int) or size_bytes < 0:
+        raise ValueError("run.configuration.backend_response.response_file_size_bytes must be a non-negative integer.")
