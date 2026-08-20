@@ -799,13 +799,14 @@ def _validate_backend_response_metadata(run: dict) -> None:
     configuration = run.get("configuration", {})
     if not isinstance(configuration, dict):
         raise ValueError("evaluation.json run.configuration must be an object.")
+    _validate_response_file_metadata(configuration, "run.configuration")
     metadata = configuration.get("backend_response")
     if metadata is None:
         return
     if not isinstance(metadata, dict):
         raise ValueError("run.configuration.backend_response must be an object when present.")
     _validate_metadata_value(metadata, "run.configuration.backend_response")
-    _validate_response_file_metadata(metadata)
+    _validate_response_file_metadata(metadata, "run.configuration.backend_response")
 
 
 def _validate_metadata_value(value: object, path: str) -> None:
@@ -830,12 +831,12 @@ def _validate_metadata_value(value: object, path: str) -> None:
             )
 
 
-def _validate_response_file_metadata(metadata: dict) -> None:
+def _validate_response_file_metadata(metadata: dict, path: str) -> None:
     if "response_file_sha256" not in metadata and "response_file_size_bytes" not in metadata:
         return
     sha256 = metadata.get("response_file_sha256")
     size_bytes = metadata.get("response_file_size_bytes")
     if not isinstance(sha256, str) or not SHA256_PATTERN.fullmatch(sha256):
-        raise ValueError("run.configuration.backend_response.response_file_sha256 must be a SHA-256 hex digest.")
+        raise ValueError(f"{path}.response_file_sha256 must be a SHA-256 hex digest.")
     if not isinstance(size_bytes, int) or size_bytes < 0:
-        raise ValueError("run.configuration.backend_response.response_file_size_bytes must be a non-negative integer.")
+        raise ValueError(f"{path}.response_file_size_bytes must be a non-negative integer.")
