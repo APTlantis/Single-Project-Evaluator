@@ -45,6 +45,8 @@ python -m single_project_evaluator evaluate --project D:\Some\Project --posture 
 
 The current backend boundary includes a no-op backend, a response-file backend, an optional OpenAI Responses API backend, and a response parser/validator for the structured model response. Structured backend responses may include an optional markdown `narrative` field, which is preserved in `evaluation.json` and rendered in `report.md`.
 
+Every returned finding must include at least one non-empty evidence reference or explicit uncertainty reference. Responses with unsupported findings are rejected before report generation.
+
 Each evaluation writes `response-template.json` as a fillable skeleton matching the structured backend response contract and the run's declared posture. Use it with `reasoning-request.json` or `reasoning-request.md` when preparing an external/manual reasoning response.
 
 Validate a saved structured backend response before using it:
@@ -81,6 +83,10 @@ python -m single_project_evaluator evaluate --project D:\Some\Project --posture 
 
 The OpenAI backend sends the same bounded reasoning request package used by the manual workflow, requests schema-guided Structured Outputs, and parses the model's returned JSON through the same response contract. It is never used unless `--backend openai` is selected.
 
+Before sending hosted context, the OpenAI backend scans outbound excerpts for likely secrets such as API keys, bearer tokens, private keys, and credential assignments. If likely sensitive material is found, the run is blocked before the API call. Rerun with `--allow-sensitive-hosted` only after explicitly accepting the disclosure risk.
+
+For hosted runs, non-secret response provenance such as response id, status, model, service tier, and token usage is preserved under `run.configuration.backend_response`. Raw model output and API credentials are not stored there.
+
 List preserved evaluation runs from an existing report directory:
 
 ```powershell
@@ -105,6 +111,8 @@ Validate that a preserved run still has the expected artifact set and internal c
 python -m single_project_evaluator validate-run --out reports
 python -m single_project_evaluator validate-run --out reports --run 93dfff32 --json
 ```
+
+`validate-run` also checks hosted-response metadata hygiene, including that `run.configuration.backend_response` does not contain raw model output, credentials, or likely secret values.
 
 ## Command Contract
 

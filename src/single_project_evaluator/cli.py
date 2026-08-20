@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
@@ -20,6 +21,7 @@ from .models import (
 from .reports import write_evaluation_artifacts
 from .response_parser import parse_backend_response
 from .serialization import evaluation_from_dict
+from .sensitivity import describe_sensitive_matches, find_sensitive_text
 
 
 EXIT_OK = 0
@@ -118,6 +120,11 @@ def build_parser() -> argparse.ArgumentParser:
         default=120,
         type=int,
         help="HTTP timeout in seconds for --backend openai.",
+    )
+    evaluate.add_argument(
+        "--allow-sensitive-hosted",
+        action="store_true",
+        help="Allow --backend openai to send context even when likely secrets are detected.",
     )
     evaluate.add_argument(
         "--json",
@@ -223,6 +230,7 @@ def evaluate_command(args: argparse.Namespace) -> int:
         model=args.model,
         api_base=args.api_base,
         timeout_seconds=args.timeout_seconds,
+        allow_sensitive=args.allow_sensitive_hosted,
     )
     run = EvaluationRun(
         report_id=str(uuid4()),
@@ -240,9 +248,11 @@ def evaluate_command(args: argparse.Namespace) -> int:
             "model": args.model,
             "api_base": args.api_base if args.backend == "openai" else None,
             "timeout_seconds": args.timeout_seconds if args.backend == "openai" else None,
+            "allow_sensitive_hosted": args.allow_sensitive_hosted if args.backend == "openai" else None,
         },
     )
     backend_result = backend.evaluate(run, evidence, context, prepared_context)
+    run = _run_with_backend_metadata(run, backend_result.metadata)
     evaluation = Evaluation(
         run=run,
         evidence=evidence,
@@ -277,6 +287,14 @@ def evaluate_command(args: argparse.Namespace) -> int:
     print(f"Wrote response template: {artifacts['latest_response_template']}")
     print(f"Wrote run index: {artifacts['run_index']}")
     return EXIT_OK
+
+
+def _run_with_backend_metadata(run: EvaluationRun, metadata: dict | None) -> EvaluationRun:
+    if not metadata:
+        return run
+    configuration = dict(run.configuration)
+    configuration["backend_response"] = metadata
+    return replace(run, configuration=configuration)
 
 
 def validate_response_command(args: argparse.Namespace) -> int:
@@ -606,6 +624,10 @@ def _validate_run_artifacts(entry: dict, artifacts: dict[str, Path]) -> list[dic
         raise ValueError("run index and evaluation.json report IDs do not match.")
     pass_check("report_id_consistency")
 
+    if run_record != _required_mapping(evaluation, "evaluation").get("run", {}):
+        raise ValueError("run-record.json does not match evaluation.json run record.")
+    pass_check("run_record_consistency")
+
     bundle_run = _required_mapping(context_bundle, "context-bundle.json").get("run", {})
     if bundle_run.get("report_id") != report_id:
         raise ValueError("context-bundle.json run record does not match evaluation.json.")
@@ -621,6 +643,9 @@ def _validate_run_artifacts(entry: dict, artifacts: dict[str, Path]) -> list[dic
     parse_backend_response(response_template, expected_posture=declared_posture)
     pass_check("response_template_contract")
 
+    _validate_backend_response_metadata(_required_mapping(evaluation, "evaluation").get("run", {}))
+    pass_check("backend_response_metadata_hygiene")
+
     if not artifacts["report"].read_text(encoding="utf-8").strip():
         raise ValueError("report.md is empty.")
     if not artifacts["reasoning_request_md"].read_text(encoding="utf-8").strip():
@@ -634,3 +659,51 @@ def _required_mapping(value: object, label: str) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{label} must be a JSON object.")
     return value
+
+
+BACKEND_RESPONSE_FORBIDDEN_KEYS = {
+    "api_key",
+    "authorization",
+    "bearer",
+    "credential",
+    "credentials",
+    "output_text",
+    "password",
+    "raw_output",
+    "raw_response",
+    "secret",
+}
+
+
+def _validate_backend_response_metadata(run: dict) -> None:
+    configuration = run.get("configuration", {})
+    if not isinstance(configuration, dict):
+        raise ValueError("evaluation.json run.configuration must be an object.")
+    metadata = configuration.get("backend_response")
+    if metadata is None:
+        return
+    if not isinstance(metadata, dict):
+        raise ValueError("run.configuration.backend_response must be an object when present.")
+    _validate_metadata_value(metadata, "run.configuration.backend_response")
+
+
+def _validate_metadata_value(value: object, path: str) -> None:
+    if isinstance(value, dict):
+        for key, item in value.items():
+            key_text = str(key)
+            normalized_key = key_text.lower().replace("-", "_")
+            if normalized_key in BACKEND_RESPONSE_FORBIDDEN_KEYS:
+                raise ValueError(f"run.configuration.backend_response contains forbidden metadata key: {path}.{key_text}")
+            _validate_metadata_value(item, f"{path}.{key_text}")
+        return
+    if isinstance(value, list):
+        for index, item in enumerate(value):
+            _validate_metadata_value(item, f"{path}[{index}]")
+        return
+    if isinstance(value, str):
+        matches = find_sensitive_text(source="backend_response", path=path, text=value)
+        if matches:
+            raise ValueError(
+                "run.configuration.backend_response contains likely sensitive metadata: "
+                + describe_sensitive_matches(matches)
+            )

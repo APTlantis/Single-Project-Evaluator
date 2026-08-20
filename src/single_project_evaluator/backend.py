@@ -22,6 +22,7 @@ from .models import (
 from .request_package import build_reasoning_request, build_response_template
 from .response_parser import parse_backend_response
 from .response_schema import build_openai_response_format
+from .sensitivity import describe_sensitive_matches, find_sensitive_material
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,7 @@ class BackendResult:
     governance_conformance: dict[str, str] | None = None
     uncertainties: list[str] | None = None
     narrative: str | None = None
+    metadata: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -96,7 +98,15 @@ class ResponseFileBackend:
         except json.JSONDecodeError as exc:
             raise ValueError(f"Response file is not valid JSON `{self.response_file}`: {exc}") from exc
 
-        return backend_result_from_response(data, expected_posture=run.declared_posture.value)
+        result = backend_result_from_response(data, expected_posture=run.declared_posture.value)
+        return BackendResult(
+            assessment=result.assessment,
+            findings=result.findings,
+            governance_conformance=result.governance_conformance,
+            uncertainties=result.uncertainties,
+            narrative=result.narrative,
+            metadata={"response_file": str(self.response_file)},
+        )
 
 
 class OpenAIResponsesBackend:
@@ -107,6 +117,7 @@ class OpenAIResponsesBackend:
         api_key: str | None = None,
         api_base: str = "https://api.openai.com/v1/responses",
         timeout_seconds: int = 120,
+        allow_sensitive: bool = False,
     ) -> None:
         api_key = api_key or os.environ.get("OPENAI_API_KEY")
         if not api_key:
@@ -118,6 +129,7 @@ class OpenAIResponsesBackend:
         self.api_key = api_key
         self.api_base = api_base
         self.timeout_seconds = timeout_seconds
+        self.allow_sensitive = allow_sensitive
         self.identity = BackendIdentity(provider="openai", model_identifier=model)
 
     def evaluate(
@@ -127,6 +139,15 @@ class OpenAIResponsesBackend:
         context: ProjectContext,
         prepared_context: PreparedContext,
     ) -> BackendResult:
+        if not self.allow_sensitive:
+            sensitive_matches = find_sensitive_material(evidence, prepared_context)
+            if sensitive_matches:
+                raise ValueError(
+                    "Hosted OpenAI evaluation blocked because likely sensitive material was found in outbound "
+                    "evaluation context. Review or remove the material, or rerun with --allow-sensitive-hosted "
+                    "after explicitly accepting the disclosure risk. Matches: "
+                    + describe_sensitive_matches(sensitive_matches)
+                )
         request_payload = self._request_payload(run, evidence, context, prepared_context)
         response_data = self._post_response(request_payload)
         output_text = _extract_output_text(response_data)
@@ -134,7 +155,15 @@ class OpenAIResponsesBackend:
             data = json.loads(output_text)
         except json.JSONDecodeError as exc:
             raise ValueError(f"OpenAI response output was not valid JSON: {exc}") from exc
-        return backend_result_from_response(data, expected_posture=run.declared_posture.value)
+        result = backend_result_from_response(data, expected_posture=run.declared_posture.value)
+        return BackendResult(
+            assessment=result.assessment,
+            findings=result.findings,
+            governance_conformance=result.governance_conformance,
+            uncertainties=result.uncertainties,
+            narrative=result.narrative,
+            metadata=_openai_response_metadata(response_data),
+        )
 
     def _request_payload(
         self,
@@ -224,6 +253,7 @@ def create_backend(
     model: str | None = None,
     api_base: str = "https://api.openai.com/v1/responses",
     timeout_seconds: int = 120,
+    allow_sensitive: bool = False,
 ) -> NoopReasoningBackend | ResponseFileBackend | OpenAIResponsesBackend:
     if name == "none":
         return NoopReasoningBackend()
@@ -234,7 +264,12 @@ def create_backend(
     if name == "openai":
         if model is None:
             raise ValueError("--model is required when --backend openai is used.")
-        return OpenAIResponsesBackend(model=model, api_base=api_base, timeout_seconds=timeout_seconds)
+        return OpenAIResponsesBackend(
+            model=model,
+            api_base=api_base,
+            timeout_seconds=timeout_seconds,
+            allow_sensitive=allow_sensitive,
+        )
     raise ValueError(f"Unsupported reasoning backend: {name}")
 
 
@@ -277,3 +312,29 @@ def _extract_output_text(data: dict[str, Any]) -> str:
             return joined
 
     raise ValueError("OpenAI API response did not contain text output.")
+
+
+def _openai_response_metadata(data: dict[str, Any]) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    for key in ["id", "status", "created_at", "model", "service_tier", "system_fingerprint"]:
+        value = data.get(key)
+        if isinstance(value, str | int | float | bool) or value is None:
+            metadata[key] = value
+
+    usage = data.get("usage")
+    if isinstance(usage, dict):
+        metadata["usage"] = {
+            str(key): value
+            for key, value in usage.items()
+            if isinstance(value, int | float | str | bool) or value is None
+        }
+
+    incomplete_details = data.get("incomplete_details")
+    if isinstance(incomplete_details, dict):
+        metadata["incomplete_details"] = {
+            str(key): value
+            for key, value in incomplete_details.items()
+            if isinstance(value, int | float | str | bool) or value is None
+        }
+
+    return metadata

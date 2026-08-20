@@ -23,6 +23,75 @@ from single_project_evaluator.response_parser import ResponseValidationError, pa
 from single_project_evaluator.serialization import evaluation_from_dict
 
 
+def _assessment(
+    *,
+    posture_fitness: str,
+    release_eligibility: str = "NOT APPLICABLE",
+    blockers: int = 0,
+    functional_completeness: int | None = 80,
+    implementation_quality: int | None = 75,
+    intent_fidelity: str = "Strong",
+    verification_confidence: str = "Partial",
+    lifecycle_fitness: str = "Appropriate",
+) -> dict:
+    return {
+        "functional_completeness": functional_completeness,
+        "implementation_quality": implementation_quality,
+        "intent_fidelity": intent_fidelity,
+        "verification_confidence": verification_confidence,
+        "posture_fitness": posture_fitness,
+        "lifecycle_fitness": lifecycle_fitness,
+        "release_eligibility": release_eligibility,
+        "blockers": blockers,
+    }
+
+
+def _finding(
+    *,
+    title: str,
+    finding_class: str = "observation",
+    authority: str = "engineering_recommendation",
+    applicability: str | None = None,
+    recommendation: str | None = None,
+) -> dict:
+    return {
+        "title": title,
+        "finding_class": finding_class,
+        "area": "Adoption Posture",
+        "authority": authority,
+        "applicability": applicability,
+        "evidence": ["README.md"],
+        "impact": "This verifies posture-specific evaluator semantics.",
+        "consequence": "The report should preserve the distinction without collapsing it into one score.",
+        "recommendation": recommendation,
+    }
+
+
+def _response(
+    *,
+    posture_fitness: str,
+    release_eligibility: str = "NOT APPLICABLE",
+    blockers: int = 0,
+    findings: list[dict] | None = None,
+    functional_completeness: int | None = 80,
+    implementation_quality: int | None = 75,
+    governance_conformance: dict[str, str] | None = None,
+) -> dict:
+    return {
+        "assessment": _assessment(
+            posture_fitness=posture_fitness,
+            release_eligibility=release_eligibility,
+            blockers=blockers,
+            functional_completeness=functional_completeness,
+            implementation_quality=implementation_quality,
+        ),
+        "findings": findings or [],
+        "governance_conformance": governance_conformance or {},
+        "uncertainties": ["Fixture response intentionally limits evidence to a small project shape."],
+        "narrative": "## Fixture Narrative\n\nThis fixture exercises posture-specific evaluation semantics.",
+    }
+
+
 class SpineTests(unittest.TestCase):
     def test_collect_project_evidence_detects_records(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -330,6 +399,48 @@ class SpineTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 create_backend("openai")
 
+    def test_openai_backend_blocks_likely_sensitive_outbound_context(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            (project / "README.md").write_text(
+                "# Example\n\nOPENAI_API_KEY = \"sk-" + ("a" * 32) + "\"\n",
+                encoding="utf-8",
+            )
+            stdout = StringIO()
+            stderr = StringIO()
+
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+                with patch("single_project_evaluator.backend.urlopen") as openai_call:
+                    with redirect_stdout(stdout), redirect_stderr(stderr):
+                        exit_code = main(
+                            [
+                                "evaluate",
+                                "--project",
+                                str(project),
+                                "--posture",
+                                AdoptionPosture.SHARED.value,
+                                "--out",
+                                str(output),
+                                "--backend",
+                                "openai",
+                                "--model",
+                                "gpt-test",
+                                "--json",
+                            ]
+                        )
+
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            self.assertEqual(openai_call.call_count, 0)
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_type"], "ValueError")
+            self.assertIn("Hosted OpenAI evaluation blocked", payload["error"])
+            self.assertIn("openai_api_key", payload["error"])
+            self.assertIn("README.md", payload["error"])
+            self.assertFalse(output.exists())
+
     def test_reasoning_request_wraps_context_without_assessment(self) -> None:
         context_bundle = {
             "run": {
@@ -472,6 +583,36 @@ class SpineTests(unittest.TestCase):
             },
             "findings": [],
             "narrative": ["not", "a", "string"],
+        }
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_rejects_finding_without_evidence(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": None,
+                "implementation_quality": None,
+                "intent_fidelity": "Strong",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "NOT APPLICABLE",
+                "blockers": 0,
+            },
+            "findings": [
+                {
+                    "title": "Unsupported finding",
+                    "finding_class": "required",
+                    "area": "Evidence",
+                    "authority": "engineering_recommendation",
+                    "applicability": None,
+                    "evidence": [],
+                    "impact": "This would be unsupported.",
+                    "consequence": "The response should be rejected.",
+                    "recommendation": None,
+                }
+            ],
         }
 
         with self.assertRaises(ResponseValidationError):
@@ -652,6 +793,39 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(payload["error_type"], "ResponseValidationError")
             self.assertIn("intent_fidelity", payload["error"])
             self.assertNotIn("Traceback", stderr.getvalue())
+
+    def test_cli_validate_response_rejects_finding_without_evidence(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            response_file = Path(tmp) / "response.json"
+            response = _response(
+                posture_fitness="Shared - Adequate",
+                findings=[
+                    {
+                        "title": "Unsupported finding",
+                        "finding_class": "required",
+                        "area": "Evidence",
+                        "authority": "engineering_recommendation",
+                        "applicability": None,
+                        "evidence": [" "],
+                        "impact": "This would be unsupported.",
+                        "consequence": "The response should be rejected.",
+                        "recommendation": None,
+                    }
+                ],
+            )
+            response_file.write_text(json.dumps(response), encoding="utf-8")
+            stdout = StringIO()
+            stderr = StringIO()
+
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(["validate-response", "--response-file", str(response_file), "--json"])
+
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_type"], "ResponseValidationError")
+            self.assertIn("evidence", payload["error"])
 
     def test_cli_writes_phase_1_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
@@ -1049,7 +1223,9 @@ class SpineTests(unittest.TestCase):
             check_names = {check["name"] for check in payload["checks"]}
             self.assertIn("required_artifacts_exist", check_names)
             self.assertIn("report_id_consistency", check_names)
+            self.assertIn("run_record_consistency", check_names)
             self.assertIn("response_template_contract", check_names)
+            self.assertIn("backend_response_metadata_hygiene", check_names)
 
     def test_cli_validate_run_reports_missing_artifact_with_json_error(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
@@ -1126,6 +1302,101 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(payload["error_type"], "ResponseValidationError")
             self.assertIn("posture_fitness", payload["error"])
             self.assertIn("personal", payload["error"])
+
+    def test_cli_validate_run_rejects_raw_backend_response_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            run_dir = output / "runs" / run_index["runs"][0]["run_dir"]
+            evaluation_path = run_dir / "evaluation.json"
+            run_record_path = run_dir / "run-record.json"
+            evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+            evaluation["run"]["configuration"]["backend_response"] = {
+                "id": "resp_example",
+                "output_text": json.dumps(build_response_template("shared")),
+            }
+            evaluation_path.write_text(json.dumps(evaluation, indent=2), encoding="utf-8")
+            run_record_path.write_text(json.dumps(evaluation["run"], indent=2), encoding="utf-8")
+
+            stdout = StringIO()
+            stderr = StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                validate_exit = main(["validate-run", "--out", str(output), "--json"])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(validate_exit, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_type"], "ValueError")
+            self.assertIn("forbidden metadata key", payload["error"])
+            self.assertIn("output_text", payload["error"])
+
+    def test_cli_validate_run_rejects_sensitive_backend_response_metadata(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp)
+            (project / "README.md").write_text("# Example\n", encoding="utf-8")
+
+            with redirect_stdout(StringIO()):
+                evaluate_exit = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "none",
+                    ]
+                )
+
+            run_index = json.loads((output / "runs" / "index.json").read_text(encoding="utf-8"))
+            run_dir = output / "runs" / run_index["runs"][0]["run_dir"]
+            evaluation_path = run_dir / "evaluation.json"
+            run_record_path = run_dir / "run-record.json"
+            evaluation = json.loads(evaluation_path.read_text(encoding="utf-8"))
+            evaluation["run"]["configuration"]["backend_response"] = {
+                "id": "resp_example",
+                "status": "completed",
+                "diagnostic": "Authorization: Bearer " + ("a" * 24),
+            }
+            evaluation_path.write_text(json.dumps(evaluation, indent=2), encoding="utf-8")
+            run_record_path.write_text(json.dumps(evaluation["run"], indent=2), encoding="utf-8")
+
+            stdout = StringIO()
+            stderr = StringIO()
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                validate_exit = main(["validate-run", "--out", str(output), "--json"])
+
+            self.assertEqual(evaluate_exit, 0)
+            self.assertEqual(validate_exit, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_type"], "ValueError")
+            self.assertIn("likely sensitive metadata", payload["error"])
+            self.assertIn("bearer_token", payload["error"])
 
     def test_cli_complete_run_reuses_preserved_context_without_recollecting_project(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
@@ -1282,6 +1553,16 @@ class SpineTests(unittest.TestCase):
             def read(self) -> bytes:
                 return json.dumps(
                     {
+                        "id": "resp_mocked_123",
+                        "status": "completed",
+                        "created_at": 1800000000,
+                        "model": "gpt-test",
+                        "service_tier": "default",
+                        "usage": {
+                            "input_tokens": 321,
+                            "output_tokens": 123,
+                            "total_tokens": 444,
+                        },
                         "output_text": json.dumps(
                             {
                                 "assessment": {
@@ -1361,9 +1642,57 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(data["run"]["reasoning_provider"], "openai")
             self.assertEqual(data["run"]["model_identifier"], "gpt-test")
             self.assertEqual(data["run"]["configuration"]["api_base"], "https://api.example.test/v1/responses")
+            self.assertEqual(data["run"]["configuration"]["backend_response"]["id"], "resp_mocked_123")
+            self.assertEqual(data["run"]["configuration"]["backend_response"]["status"], "completed")
+            self.assertEqual(data["run"]["configuration"]["backend_response"]["usage"]["total_tokens"], 444)
+            self.assertNotIn("output_text", data["run"]["configuration"]["backend_response"])
             self.assertEqual(data["assessment"]["functional_completeness"], 88)
             self.assertEqual(data["governance_conformance"]["PPS"], "not evaluated")
             self.assertIn("The mocked API result was parsed.", (output / "report.md").read_text(encoding="utf-8"))
+
+    def test_cli_can_explicitly_allow_sensitive_hosted_context(self) -> None:
+        class FakeHTTPResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, traceback):
+                return False
+
+            def read(self) -> bytes:
+                return json.dumps({"output_text": json.dumps(build_response_template("shared"))}).encode("utf-8")
+
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            (project / "README.md").write_text(
+                "# Example\n\nOPENAI_API_KEY = \"sk-" + ("b" * 32) + "\"\n",
+                encoding="utf-8",
+            )
+
+            with patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"}, clear=True):
+                with patch("single_project_evaluator.backend.urlopen", return_value=FakeHTTPResponse()) as openai_call:
+                    with redirect_stdout(StringIO()):
+                        exit_code = main(
+                            [
+                                "evaluate",
+                                "--project",
+                                str(project),
+                                "--posture",
+                                AdoptionPosture.SHARED.value,
+                                "--out",
+                                str(output),
+                                "--backend",
+                                "openai",
+                                "--model",
+                                "gpt-test",
+                                "--allow-sensitive-hosted",
+                            ]
+                        )
+
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(openai_call.call_count, 1)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            self.assertTrue(data["run"]["configuration"]["allow_sensitive_hosted"])
 
     def test_cli_reports_missing_run_index_without_traceback(self) -> None:
         with tempfile.TemporaryDirectory() as out_tmp:
@@ -1466,6 +1795,176 @@ class SpineTests(unittest.TestCase):
             self.assertIn("## Backend Narrative", report)
             self.assertIn("The supplied response describes a usable evidence bundle.", report)
             self.assertIn("This report uses a parsed backend response.", report)
+
+    def test_personal_fixture_does_not_treat_non_adoptability_as_defect(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "personal-response.json"
+            (project / "README.md").write_text(
+                "# Personal Helper\n\nA one-operator script with local paths documented for its creator.\n",
+                encoding="utf-8",
+            )
+            response_file.write_text(
+                json.dumps(
+                    _response(
+                        posture_fitness="Personal - Strong",
+                        findings=[
+                            _finding(
+                                title="Creator-specific operation is acceptable for personal posture",
+                                finding_class="observation",
+                                authority="adoption_recommendation",
+                                applicability="not_applicable",
+                                recommendation="Do not broaden onboarding until the declared posture changes.",
+                            )
+                        ],
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.PERSONAL.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            report = (output / "report.md").read_text(encoding="utf-8")
+            self.assertEqual(data["assessment"]["posture_fitness"], "Personal - Strong")
+            self.assertEqual(data["assessment"]["release_eligibility"], "NOT APPLICABLE")
+            self.assertEqual(data["findings"][0]["applicability"], "not_applicable")
+            self.assertEqual(data["findings"][0]["authority"], "adoption_recommendation")
+            self.assertIn("Do not broaden onboarding until the declared posture changes.", report)
+
+    def test_shared_fixture_preserves_deferred_governance_without_release_block(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "shared-response.json"
+            (project / "README.md").write_text(
+                "# Shared Tool\n\nA small tool intended for similar operators, with governance still being mapped.\n",
+                encoding="utf-8",
+            )
+            response_file.write_text(
+                json.dumps(
+                    _response(
+                        posture_fitness="Shared - Adequate",
+                        findings=[
+                            _finding(
+                                title="Governance control mapping remains deferred",
+                                finding_class="observation",
+                                authority="governance_requirement",
+                                applicability="deferred",
+                                recommendation="Complete control mapping before treating conformance as measured.",
+                            )
+                        ],
+                        governance_conformance={"CTS": "deferred; 0/0 controls evaluated"},
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.SHARED.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            report = (output / "report.md").read_text(encoding="utf-8")
+            self.assertEqual(data["assessment"]["posture_fitness"], "Shared - Adequate")
+            self.assertEqual(data["assessment"]["release_eligibility"], "NOT APPLICABLE")
+            self.assertEqual(data["assessment"]["blockers"], 0)
+            self.assertEqual(data["findings"][0]["applicability"], "deferred")
+            self.assertEqual(data["governance_conformance"]["CTS"], "deferred; 0/0 controls evaluated")
+            self.assertIn("Governance control mapping remains deferred", report)
+
+    def test_adoptable_fixture_can_be_high_quality_and_release_blocked(self) -> None:
+        with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
+            project = Path(project_tmp)
+            output = Path(out_tmp) / "out"
+            response_file = Path(out_tmp) / "adoptable-response.json"
+            (project / "README.md").write_text(
+                "# Adoptable Tool\n\nA polished package candidate that lacks a required release checklist.\n",
+                encoding="utf-8",
+            )
+            response_file.write_text(
+                json.dumps(
+                    _response(
+                        posture_fitness="Adoptable - Adequate",
+                        release_eligibility="BLOCKED",
+                        blockers=1,
+                        functional_completeness=94,
+                        implementation_quality=91,
+                        findings=[
+                            _finding(
+                                title="Release checklist is required before adoptable release",
+                                finding_class="required",
+                                authority="governance_requirement",
+                                applicability="unsatisfied",
+                                recommendation="Add release checklist evidence before release.",
+                            )
+                        ],
+                        governance_conformance={"DRS": "blocked; 3/4 applicable controls satisfied"},
+                    )
+                ),
+                encoding="utf-8",
+            )
+
+            with redirect_stdout(StringIO()):
+                exit_code = main(
+                    [
+                        "evaluate",
+                        "--project",
+                        str(project),
+                        "--posture",
+                        AdoptionPosture.ADOPTABLE.value,
+                        "--out",
+                        str(output),
+                        "--backend",
+                        "response-file",
+                        "--response-file",
+                        str(response_file),
+                    ]
+                )
+
+            self.assertEqual(exit_code, 0)
+            data = json.loads((output / "evaluation.json").read_text(encoding="utf-8"))
+            report = (output / "report.md").read_text(encoding="utf-8")
+            self.assertEqual(data["assessment"]["functional_completeness"], 94)
+            self.assertEqual(data["assessment"]["implementation_quality"], 91)
+            self.assertEqual(data["assessment"]["posture_fitness"], "Adoptable - Adequate")
+            self.assertEqual(data["assessment"]["release_eligibility"], "BLOCKED")
+            self.assertEqual(data["assessment"]["blockers"], 1)
+            self.assertEqual(data["findings"][0]["finding_class"], "required")
+            self.assertEqual(data["findings"][0]["applicability"], "unsatisfied")
+            self.assertIn("Functional Completeness: 94%", report)
+            self.assertIn("Release Eligibility: BLOCKED", report)
 
     def test_cli_rejects_response_file_with_mismatched_declared_posture(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:

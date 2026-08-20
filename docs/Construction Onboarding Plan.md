@@ -45,12 +45,16 @@ Current status:
 - No-op backend boundary implemented.
 - Provider-neutral reasoning request package implemented.
 - Structured backend response validation implemented.
+- Finding validation now requires each returned finding to include at least one non-empty evidence or uncertainty reference.
 - Optional backend narrative preservation and report rendering implemented for response-file runs.
 - Posture-aware response validation and fillable `response-template.json` artifact implemented to bridge prepared context to response-file evaluation.
 - Preserved run inspection and integrity validation implemented with `list-runs`, `show-run`, and `validate-run`, including JSON output.
+- `validate-run` checks backend response metadata hygiene so hosted provenance cannot silently preserve raw model output or likely credentials.
 - Preserved run completion implemented with `complete-run`, allowing a structured response file to generate a new completed run from saved context without rereading the evaluated project.
 - Optional OpenAI Responses API backend implemented behind explicit `--backend openai` selection.
 - OpenAI backend requests schema-guided Structured Outputs before parser validation.
+- Hosted OpenAI requests are blocked by default when outbound authority records, governance material, or text snippets contain likely secrets; `--allow-sensitive-hosted` is required to override after explicit operator acceptance.
+- Hosted response provenance records non-secret response id/status/model/service-tier/usage metadata without storing raw model output or credentials.
 - Model-backed evaluation is available only when explicitly selected with credentials and a model; passive/no-op and manual response-file workflows remain supported.
 
 ### Phase 2: Core Evaluation Workflow
@@ -73,6 +77,13 @@ Objectives:
 - Verify Deferred and N/A controls are not treated as failures.
 - Verify release eligibility remains distinct from functional completeness.
 - Verify unsupported claims are not reported as demonstrated failures.
+
+Current status:
+
+- Started with response-file fixture runs for Personal, Shared, and Adoptable postures.
+- Personal fixture verifies creator-specific/non-adoptable assumptions can be appropriate at personal posture.
+- Shared fixture verifies Deferred governance applicability is preserved without becoming a release blocker.
+- Adoptable fixture verifies high completeness and implementation quality can coexist with BLOCKED release eligibility.
 
 ### Phase 4: CTS Release Work
 
