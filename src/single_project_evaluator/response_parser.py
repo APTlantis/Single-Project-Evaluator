@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .models import (
@@ -21,6 +22,10 @@ LIFECYCLE_FITNESS_VALUES = {"Appropriate", "Ahead of Evidence", "Behind Actual S
 RELEASE_ELIGIBILITY_VALUES = {"PASS", "BLOCKED", "NOT APPLICABLE"}
 POSTURE_FITNESS_PREFIXES = ("Personal - ", "Shared - ", "Adoptable - ")
 POSTURE_FITNESS_VALUES = {"Strong", "Adequate", "Marginal", "Weak", "Not assessed"}
+GOVERNANCE_CONFORMANCE_PATTERN = re.compile(
+    r"^(?:100|[1-9]?\d)% \((?:0|[1-9]\d*)/(?:0|[1-9]\d*) applicable controls satisfied\)$"
+)
+GOVERNANCE_CONFORMANCE_NOT_APPLICABLE = "N/A (0/0 applicable controls satisfied)"
 
 
 def parse_backend_response(
@@ -33,15 +38,13 @@ def parse_backend_response(
     assessment = _parse_assessment(_required_dict(data, "assessment"))
     _validate_expected_posture(assessment.posture_fitness, expected_posture)
     findings = [_parse_finding(item) for item in _required_list(data, "findings")]
-    governance = data.get("governance_conformance", {})
-    if not isinstance(governance, dict):
-        raise ResponseValidationError("governance_conformance must be an object when present.")
+    governance = _parse_governance_conformance(data.get("governance_conformance", {}))
     uncertainties = data.get("uncertainties", [])
     if not isinstance(uncertainties, list) or not all(isinstance(item, str) for item in uncertainties):
         raise ResponseValidationError("uncertainties must be a list of strings when present.")
     narrative = _optional_string(data.get("narrative"), "narrative")
 
-    return assessment, findings, {str(key): str(value) for key, value in governance.items()}, uncertainties, narrative
+    return assessment, findings, governance, uncertainties, narrative
 
 
 def _parse_assessment(data: dict[str, Any]) -> AssessmentProfile:
@@ -72,6 +75,24 @@ def _parse_finding(data: Any) -> Finding:
         consequence=_required_string(data, "consequence"),
         recommendation=_optional_string(data.get("recommendation"), "recommendation"),
     )
+
+
+def _parse_governance_conformance(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        raise ResponseValidationError("governance_conformance must be an object when present.")
+    parsed: dict[str, str] = {}
+    for standard, result in value.items():
+        if not isinstance(standard, str) or not standard.strip():
+            raise ResponseValidationError("governance_conformance keys must be non-empty standard names.")
+        if not isinstance(result, str) or not result.strip():
+            raise ResponseValidationError("governance_conformance values must be non-empty strings.")
+        if result != GOVERNANCE_CONFORMANCE_NOT_APPLICABLE and not GOVERNANCE_CONFORMANCE_PATTERN.match(result):
+            raise ResponseValidationError(
+                "governance_conformance values must use '<percent>% (<satisfied>/<applicable> applicable controls satisfied)' "
+                f"or {GOVERNANCE_CONFORMANCE_NOT_APPLICABLE!r}."
+            )
+        parsed[standard] = result
+    return parsed
 
 
 def _required_dict(data: dict[str, Any], key: str) -> dict[str, Any]:

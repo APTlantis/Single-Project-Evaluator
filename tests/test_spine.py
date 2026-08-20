@@ -503,7 +503,7 @@ class SpineTests(unittest.TestCase):
                     "recommendation": None,
                 }
             ],
-            "governance_conformance": {"DRS": "not evaluated"},
+            "governance_conformance": {"DRS": "80% (4/5 applicable controls satisfied)"},
             "uncertainties": ["No tests were supplied."],
         }
 
@@ -511,7 +511,7 @@ class SpineTests(unittest.TestCase):
 
         self.assertEqual(assessment.functional_completeness, 80)
         self.assertEqual(findings[0].finding_class.value, "observation")
-        self.assertEqual(governance["DRS"], "not evaluated")
+        self.assertEqual(governance["DRS"], "80% (4/5 applicable controls satisfied)")
         self.assertEqual(uncertainties, ["No tests were supplied."])
         self.assertIsNone(narrative)
 
@@ -618,6 +618,25 @@ class SpineTests(unittest.TestCase):
         with self.assertRaises(ResponseValidationError):
             parse_backend_response(response)
 
+    def test_parse_backend_response_rejects_unstructured_governance_conformance(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": None,
+                "implementation_quality": None,
+                "intent_fidelity": "Strong",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "NOT APPLICABLE",
+                "blockers": 0,
+            },
+            "findings": [],
+            "governance_conformance": {"PPS": "not evaluated"},
+        }
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
     def test_cli_validate_response_accepts_valid_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             response_file = Path(tmp) / "response.json"
@@ -635,7 +654,7 @@ class SpineTests(unittest.TestCase):
                             "blockers": 0,
                         },
                         "findings": [],
-                        "governance_conformance": {"PPS": "not evaluated"},
+                        "governance_conformance": {"PPS": "N/A (0/0 applicable controls satisfied)"},
                         "uncertainties": [],
                     }
                 ),
@@ -667,7 +686,7 @@ class SpineTests(unittest.TestCase):
                             "blockers": 0,
                         },
                         "findings": [],
-                        "governance_conformance": {"PPS": "not evaluated"},
+                        "governance_conformance": {"PPS": "N/A (0/0 applicable controls satisfied)"},
                         "uncertainties": [],
                     }
                 ),
@@ -826,6 +845,27 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(payload["status"], "error")
             self.assertEqual(payload["error_type"], "ResponseValidationError")
             self.assertIn("evidence", payload["error"])
+
+    def test_cli_validate_response_rejects_unstructured_governance_conformance(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            response_file = Path(tmp) / "response.json"
+            response = _response(
+                posture_fitness="Shared - Adequate",
+                governance_conformance={"PPS": "not evaluated"},
+            )
+            response_file.write_text(json.dumps(response), encoding="utf-8")
+            stdout = StringIO()
+            stderr = StringIO()
+
+            with redirect_stdout(stdout), redirect_stderr(stderr):
+                exit_code = main(["validate-response", "--response-file", str(response_file), "--json"])
+
+            self.assertEqual(exit_code, 1)
+            self.assertEqual(stdout.getvalue(), "")
+            payload = json.loads(stderr.getvalue())
+            self.assertEqual(payload["status"], "error")
+            self.assertEqual(payload["error_type"], "ResponseValidationError")
+            self.assertIn("governance_conformance", payload["error"])
 
     def test_cli_writes_phase_1_artifacts(self) -> None:
         with tempfile.TemporaryDirectory() as project_tmp, tempfile.TemporaryDirectory() as out_tmp:
@@ -1452,7 +1492,7 @@ class SpineTests(unittest.TestCase):
                                 "recommendation": None,
                             }
                         ],
-                        "governance_conformance": {"PPS": "not evaluated"},
+                        "governance_conformance": {"PPS": "N/A (0/0 applicable controls satisfied)"},
                         "uncertainties": ["The response was supplied from a test fixture."],
                         "narrative": "## Evaluation Narrative\n\nThe saved bundle was completed without recollecting.",
                     }
@@ -1588,7 +1628,7 @@ class SpineTests(unittest.TestCase):
                                         "recommendation": None,
                                     }
                                 ],
-                                "governance_conformance": {"PPS": "not evaluated"},
+                                "governance_conformance": {"PPS": "N/A (0/0 applicable controls satisfied)"},
                                 "uncertainties": ["The API was mocked in this test."],
                                 "narrative": "## Evaluation Narrative\n\nThe mocked API result was parsed.",
                             }
@@ -1647,7 +1687,7 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(data["run"]["configuration"]["backend_response"]["usage"]["total_tokens"], 444)
             self.assertNotIn("output_text", data["run"]["configuration"]["backend_response"])
             self.assertEqual(data["assessment"]["functional_completeness"], 88)
-            self.assertEqual(data["governance_conformance"]["PPS"], "not evaluated")
+            self.assertEqual(data["governance_conformance"]["PPS"], "N/A (0/0 applicable controls satisfied)")
             self.assertIn("The mocked API result was parsed.", (output / "report.md").read_text(encoding="utf-8"))
 
     def test_cli_can_explicitly_allow_sensitive_hosted_context(self) -> None:
@@ -1754,7 +1794,7 @@ class SpineTests(unittest.TestCase):
                                 "recommendation": None,
                             }
                         ],
-                        "governance_conformance": {"PPS": "not evaluated"},
+                        "governance_conformance": {"PPS": "N/A (0/0 applicable controls satisfied)"},
                         "uncertainties": ["The response was supplied from a test fixture."],
                         "narrative": "## Evaluation Narrative\n\nThe supplied response describes a usable evidence bundle.",
                     }
@@ -1784,13 +1824,13 @@ class SpineTests(unittest.TestCase):
             report = (output / "report.md").read_text(encoding="utf-8")
             self.assertEqual(data["run"]["reasoning_provider"], "response-file")
             self.assertEqual(data["assessment"]["functional_completeness"], 90)
-            self.assertEqual(data["governance_conformance"]["PPS"], "not evaluated")
+            self.assertEqual(data["governance_conformance"]["PPS"], "N/A (0/0 applicable controls satisfied)")
             self.assertEqual(data["uncertainties"], ["The response was supplied from a test fixture."])
             self.assertEqual(
                 data["narrative"],
                 "## Evaluation Narrative\n\nThe supplied response describes a usable evidence bundle.",
             )
-            self.assertIn("PPS: not evaluated", report)
+            self.assertIn("PPS: N/A (0/0 applicable controls satisfied)", report)
             self.assertIn("The response was supplied from a test fixture.", report)
             self.assertIn("## Backend Narrative", report)
             self.assertIn("The supplied response describes a usable evidence bundle.", report)
@@ -1871,7 +1911,7 @@ class SpineTests(unittest.TestCase):
                                 recommendation="Complete control mapping before treating conformance as measured.",
                             )
                         ],
-                        governance_conformance={"CTS": "deferred; 0/0 controls evaluated"},
+                        governance_conformance={"CTS": "N/A (0/0 applicable controls satisfied)"},
                     )
                 ),
                 encoding="utf-8",
@@ -1901,7 +1941,7 @@ class SpineTests(unittest.TestCase):
             self.assertEqual(data["assessment"]["release_eligibility"], "NOT APPLICABLE")
             self.assertEqual(data["assessment"]["blockers"], 0)
             self.assertEqual(data["findings"][0]["applicability"], "deferred")
-            self.assertEqual(data["governance_conformance"]["CTS"], "deferred; 0/0 controls evaluated")
+            self.assertEqual(data["governance_conformance"]["CTS"], "N/A (0/0 applicable controls satisfied)")
             self.assertIn("Governance control mapping remains deferred", report)
 
     def test_adoptable_fixture_can_be_high_quality_and_release_blocked(self) -> None:
@@ -1930,7 +1970,7 @@ class SpineTests(unittest.TestCase):
                                 recommendation="Add release checklist evidence before release.",
                             )
                         ],
-                        governance_conformance={"DRS": "blocked; 3/4 applicable controls satisfied"},
+                        governance_conformance={"DRS": "75% (3/4 applicable controls satisfied)"},
                     )
                 ),
                 encoding="utf-8",

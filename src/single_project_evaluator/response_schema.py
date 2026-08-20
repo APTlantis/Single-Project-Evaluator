@@ -102,7 +102,10 @@ EVALUATION_RESPONSE_SCHEMA: dict[str, Any] = {
         },
         "governance_conformance": {
             "type": "object",
-            "additionalProperties": {"type": "string"},
+            "additionalProperties": {
+                "type": "string",
+                "pattern": "^(?:N/A \\(0/0 applicable controls satisfied\\)|(?:100|[1-9]?\\d)% \\((?:0|[1-9]\\d*)/(?:0|[1-9]\\d*) applicable controls satisfied\\))$",
+            },
         },
         "uncertainties": {
             "type": "array",

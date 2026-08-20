@@ -40,7 +40,7 @@ REQUIRED_RESPONSE_CONTRACT: dict[str, Any] = {
         }
     ],
     "governance_conformance": {
-        "STANDARD": "percentage/count string when conformance has actually been evaluated"
+        "STANDARD": "NN% (satisfied/applicable applicable controls satisfied), or N/A (0/0 applicable controls satisfied)"
     },
     "uncertainties": ["important limits in supplied evidence or reasoning"],
     "narrative": "optional markdown narrative explaining the assessment, evidence, limits, and priority of findings",

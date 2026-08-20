@@ -47,6 +47,8 @@ The current backend boundary includes a no-op backend, a response-file backend, 
 
 Every returned finding must include at least one non-empty evidence reference or explicit uncertainty reference. Responses with unsupported findings are rejected before report generation.
 
+When `governance_conformance` includes a standard, its value must use a percentage plus satisfied/applicable count, such as `75% (3/4 applicable controls satisfied)`, or `N/A (0/0 applicable controls satisfied)` when no controls are applicable.
+
 Each evaluation writes `response-template.json` as a fillable skeleton matching the structured backend response contract and the run's declared posture. Use it with `reasoning-request.json` or `reasoning-request.md` when preparing an external/manual reasoning response.
 
 Validate a saved structured backend response before using it:

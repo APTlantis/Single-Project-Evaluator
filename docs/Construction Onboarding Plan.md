@@ -46,6 +46,7 @@ Current status:
 - Provider-neutral reasoning request package implemented.
 - Structured backend response validation implemented.
 - Finding validation now requires each returned finding to include at least one non-empty evidence or uncertainty reference.
+- Governance conformance validation now requires percentage plus satisfied/applicable count strings when conformance entries are present.
 - Optional backend narrative preservation and report rendering implemented for response-file runs.
 - Posture-aware response validation and fillable `response-template.json` artifact implemented to bridge prepared context to response-file evaluation.
 - Preserved run inspection and integrity validation implemented with `list-runs`, `show-run`, and `validate-run`, including JSON output.
