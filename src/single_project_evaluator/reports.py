@@ -17,6 +17,12 @@ ARTIFACT_FILENAMES = {
     "reasoning_request_md": "reasoning-request.md",
     "response_template": "response-template.json",
 }
+FINDING_PRIORITY = {
+    FindingClass.REQUIRED: 0,
+    FindingClass.SHOULD: 1,
+    FindingClass.COULD: 2,
+    FindingClass.OBSERVATION: 3,
+}
 
 
 def write_evaluation_artifacts(evaluation: Evaluation, output_dir: Path) -> dict[str, Path]:
@@ -211,6 +217,18 @@ def render_markdown_report(evaluation: Evaluation) -> str:
     else:
         lines.append("- No backend-supplied narrative.")
 
+    lines.extend(["", "## Priority Findings", ""])
+    ordered_findings = _ordered_findings(evaluation)
+    if ordered_findings:
+        for finding in ordered_findings:
+            applicability = f"; {finding.applicability.value}" if finding.applicability else ""
+            lines.append(
+                f"- {finding.finding_class.value.title()}: {finding.title} "
+                f"({finding.area}; {finding.authority.value}{applicability})"
+            )
+    else:
+        lines.append("- No backend-supplied findings.")
+
     lines.extend(["", "## Prepared Evaluation Context", ""])
     lines.extend(
         [
@@ -340,7 +358,7 @@ def render_markdown_report(evaluation: Evaluation) -> str:
         lines.append("- No evidence collection notes.")
 
     lines.extend(["", "## Findings", ""])
-    for finding in evaluation.findings:
+    for finding in ordered_findings:
         lines.extend(
             [
                 f"### {finding.finding_class.value.title()}: {finding.title}",
@@ -379,6 +397,13 @@ def render_markdown_report(evaluation: Evaluation) -> str:
 
 def _pct(value: int | None) -> str:
     return "Not assessed" if value is None else f"{value}%"
+
+
+def _ordered_findings(evaluation: Evaluation):
+    return sorted(
+        evaluation.findings,
+        key=lambda finding: (FINDING_PRIORITY[finding.finding_class], finding.title.casefold()),
+    )
 
 
 def _context_value(value) -> str:

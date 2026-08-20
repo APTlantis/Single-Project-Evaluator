@@ -551,6 +551,78 @@ class SpineTests(unittest.TestCase):
         with self.assertRaises(ResponseValidationError):
             parse_backend_response(response)
 
+    def test_parse_backend_response_rejects_blocked_without_blockers(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": None,
+                "implementation_quality": None,
+                "intent_fidelity": "Strong",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "BLOCKED",
+                "blockers": 0,
+            },
+            "findings": [],
+        }
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_rejects_pass_with_blockers(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": None,
+                "implementation_quality": None,
+                "intent_fidelity": "Strong",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "PASS",
+                "blockers": 1,
+            },
+            "findings": [],
+        }
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_rejects_blockers_without_required_unsatisfied_findings(self) -> None:
+        response = _response(
+            posture_fitness="Shared - Adequate",
+            release_eligibility="BLOCKED",
+            blockers=1,
+            findings=[
+                _finding(
+                    title="Deferred release checklist mapping",
+                    finding_class="observation",
+                    authority="governance_requirement",
+                    applicability="deferred",
+                )
+            ],
+        )
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_rejects_hidden_required_unsatisfied_finding(self) -> None:
+        response = _response(
+            posture_fitness="Shared - Adequate",
+            release_eligibility="PASS",
+            blockers=0,
+            findings=[
+                _finding(
+                    title="Required release checklist is absent",
+                    finding_class="required",
+                    authority="governance_requirement",
+                    applicability="unsatisfied",
+                )
+            ],
+        )
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
     def test_parse_backend_response_rejects_invalid_posture_fitness(self) -> None:
         response = {
             "assessment": {
@@ -632,6 +704,44 @@ class SpineTests(unittest.TestCase):
             },
             "findings": [],
             "governance_conformance": {"PPS": "not evaluated"},
+        }
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_rejects_inconsistent_governance_conformance_math(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": None,
+                "implementation_quality": None,
+                "intent_fidelity": "Strong",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "NOT APPLICABLE",
+                "blockers": 0,
+            },
+            "findings": [],
+            "governance_conformance": {"PPS": "80% (3/4 applicable controls satisfied)"},
+        }
+
+        with self.assertRaises(ResponseValidationError):
+            parse_backend_response(response)
+
+    def test_parse_backend_response_rejects_impossible_governance_conformance_count(self) -> None:
+        response = {
+            "assessment": {
+                "functional_completeness": None,
+                "implementation_quality": None,
+                "intent_fidelity": "Strong",
+                "verification_confidence": "Partial",
+                "posture_fitness": "Shared - Adequate",
+                "lifecycle_fitness": "Appropriate",
+                "release_eligibility": "NOT APPLICABLE",
+                "blockers": 0,
+            },
+            "findings": [],
+            "governance_conformance": {"PPS": "100% (4/3 applicable controls satisfied)"},
         }
 
         with self.assertRaises(ResponseValidationError):

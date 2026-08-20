@@ -23,7 +23,7 @@ RELEASE_ELIGIBILITY_VALUES = {"PASS", "BLOCKED", "NOT APPLICABLE"}
 POSTURE_FITNESS_PREFIXES = ("Personal - ", "Shared - ", "Adoptable - ")
 POSTURE_FITNESS_VALUES = {"Strong", "Adequate", "Marginal", "Weak", "Not assessed"}
 GOVERNANCE_CONFORMANCE_PATTERN = re.compile(
-    r"^(?:100|[1-9]?\d)% \((?:0|[1-9]\d*)/(?:0|[1-9]\d*) applicable controls satisfied\)$"
+    r"^(?P<percent>100|[1-9]?\d)% \((?P<satisfied>0|[1-9]\d*)/(?P<applicable>0|[1-9]\d*) applicable controls satisfied\)$"
 )
 GOVERNANCE_CONFORMANCE_NOT_APPLICABLE = "N/A (0/0 applicable controls satisfied)"
 
@@ -38,6 +38,7 @@ def parse_backend_response(
     assessment = _parse_assessment(_required_dict(data, "assessment"))
     _validate_expected_posture(assessment.posture_fitness, expected_posture)
     findings = [_parse_finding(item) for item in _required_list(data, "findings")]
+    _validate_finding_blocker_consistency(assessment, findings)
     governance = _parse_governance_conformance(data.get("governance_conformance", {}))
     uncertainties = data.get("uncertainties", [])
     if not isinstance(uncertainties, list) or not all(isinstance(item, str) for item in uncertainties):
@@ -48,6 +49,9 @@ def parse_backend_response(
 
 
 def _parse_assessment(data: dict[str, Any]) -> AssessmentProfile:
+    release_eligibility = _enum_string(data, "release_eligibility", RELEASE_ELIGIBILITY_VALUES)
+    blockers = _nonnegative_int(data.get("blockers"), "blockers")
+    _validate_release_blocker_consistency(release_eligibility, blockers)
     return AssessmentProfile(
         functional_completeness=_optional_percent(data.get("functional_completeness"), "functional_completeness"),
         implementation_quality=_optional_percent(data.get("implementation_quality"), "implementation_quality"),
@@ -55,8 +59,8 @@ def _parse_assessment(data: dict[str, Any]) -> AssessmentProfile:
         verification_confidence=_enum_string(data, "verification_confidence", VERIFICATION_CONFIDENCE_VALUES),
         posture_fitness=_posture_fitness(data),
         lifecycle_fitness=_enum_string(data, "lifecycle_fitness", LIFECYCLE_FITNESS_VALUES),
-        release_eligibility=_enum_string(data, "release_eligibility", RELEASE_ELIGIBILITY_VALUES),
-        blockers=_nonnegative_int(data.get("blockers"), "blockers"),
+        release_eligibility=release_eligibility,
+        blockers=blockers,
     )
 
 
@@ -86,10 +90,29 @@ def _parse_governance_conformance(value: Any) -> dict[str, str]:
             raise ResponseValidationError("governance_conformance keys must be non-empty standard names.")
         if not isinstance(result, str) or not result.strip():
             raise ResponseValidationError("governance_conformance values must be non-empty strings.")
-        if result != GOVERNANCE_CONFORMANCE_NOT_APPLICABLE and not GOVERNANCE_CONFORMANCE_PATTERN.match(result):
+        if result == GOVERNANCE_CONFORMANCE_NOT_APPLICABLE:
+            parsed[standard] = result
+            continue
+        match = GOVERNANCE_CONFORMANCE_PATTERN.match(result)
+        if not match:
             raise ResponseValidationError(
                 "governance_conformance values must use '<percent>% (<satisfied>/<applicable> applicable controls satisfied)' "
                 f"or {GOVERNANCE_CONFORMANCE_NOT_APPLICABLE!r}."
+            )
+        percent = int(match.group("percent"))
+        satisfied = int(match.group("satisfied"))
+        applicable = int(match.group("applicable"))
+        if applicable == 0:
+            raise ResponseValidationError(
+                "governance_conformance values with 0 applicable controls must use "
+                f"{GOVERNANCE_CONFORMANCE_NOT_APPLICABLE!r}."
+            )
+        if satisfied > applicable:
+            raise ResponseValidationError("governance_conformance satisfied controls cannot exceed applicable controls.")
+        expected_percent = round((satisfied / applicable) * 100)
+        if percent != expected_percent:
+            raise ResponseValidationError(
+                "governance_conformance percent must match the rounded satisfied/applicable control count."
             )
         parsed[standard] = result
     return parsed
@@ -143,6 +166,32 @@ def _validate_expected_posture(posture_fitness: str, expected_posture: str | Non
     if not posture_fitness.startswith(expected_prefix):
         raise ResponseValidationError(
             f"posture_fitness must start with {expected_prefix!r} for declared posture {expected_posture!r}."
+        )
+
+
+def _validate_release_blocker_consistency(release_eligibility: str, blockers: int) -> None:
+    if release_eligibility == "BLOCKED" and blockers == 0:
+        raise ResponseValidationError("release_eligibility BLOCKED requires blockers to be greater than 0.")
+    if release_eligibility in {"PASS", "NOT APPLICABLE"} and blockers != 0:
+        raise ResponseValidationError(
+            "blockers must be 0 when release_eligibility is PASS or NOT APPLICABLE."
+        )
+
+
+def _validate_finding_blocker_consistency(assessment: AssessmentProfile, findings: list[Finding]) -> None:
+    blocker_findings = [
+        finding
+        for finding in findings
+        if finding.finding_class == FindingClass.REQUIRED
+        and finding.applicability == ApplicabilityState.UNSATISFIED
+    ]
+    if assessment.blockers > len(blocker_findings):
+        raise ResponseValidationError(
+            "blockers must be supported by at least that many required findings with unsatisfied applicability."
+        )
+    if assessment.release_eligibility in {"PASS", "NOT APPLICABLE"} and blocker_findings:
+        raise ResponseValidationError(
+            "required findings with unsatisfied applicability require BLOCKED release_eligibility."
         )
 
 

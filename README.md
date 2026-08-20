@@ -49,6 +49,9 @@ Every returned finding must include at least one non-empty evidence reference or
 
 When `governance_conformance` includes a standard, its value must use a percentage plus satisfied/applicable count, such as `75% (3/4 applicable controls satisfied)`, or `N/A (0/0 applicable controls satisfied)` when no controls are applicable.
 
+`release_eligibility` and `blockers` must agree: `BLOCKED` requires at least one blocker, while `PASS` and `NOT APPLICABLE` require zero blockers.
+Each blocker must be supported by a `required` finding with `unsatisfied` applicability; `PASS` and `NOT APPLICABLE` responses cannot contain hidden Required/Unsatisfied findings.
+
 Each evaluation writes `response-template.json` as a fillable skeleton matching the structured backend response contract and the run's declared posture. Use it with `reasoning-request.json` or `reasoning-request.md` when preparing an external/manual reasoning response.
 
 Validate a saved structured backend response before using it:
